@@ -5,6 +5,13 @@ from pony.orm import *
 import uuid
 
 db = Database()
+"""db.bind(provider='postgres', 
+    user='wr',
+    password='KfW9ZvaEJlax1Bx',
+    host='localhost',
+    database='wrReIdentificationTest',
+    port=5432)"""
+db.bind(provider='sqlite', filename='db.sqlite', create_db=True, timeout=500)
 
 
 class Person(db.Entity):
@@ -39,12 +46,6 @@ class Car(db.Entity):
 class PersonRepo:
     def __init__(self, data_base, debug=True):
         self.db = data_base
-        self.db.bind(provider='postgres',
-                     user='WhiteRabbit',
-                     password='KfW9ZvaEJlax1Bx',
-                     host='localhost',
-                     database='WhiteRabbitReIdentificationTest',
-                     port=5432)
         self.debug = debug
         set_sql_debug(self.debug)
         self.db.generate_mapping(create_tables=True)
