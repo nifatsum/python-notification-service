@@ -5,7 +5,7 @@ import uuid
 import json
 
 db = Database()
-db.bind(provider='sqlite', filename='notifications.sqlite', create_db=True, timeout=500)
+db.bind(provider="sqlite", filename="notifications.sqlite", create_db=True)
 
 class EntityCreationError(ValueError):
     def __init__(self, message, inner=None, *args, **kwargs):
@@ -15,18 +15,21 @@ class EntityCreationError(ValueError):
 
 class EntityHelper:
     @staticmethod
-    def json_convert_default(o):
-        if isinstance(o, datetime):
-            return o.isoformat()
-        if isinstance(o, uuid.UUID):
-            return str(o)
-        return json.dumps(o)
+    def json_convert_default(obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        if isinstance(obj, uuid.UUID):
+            return str(obj)
+        if isinstance(obj, Decimal):
+            return str(obj)
+        return json.dumps(obj)
 
     @staticmethod
     def to_string(o):
-        s = '[{0}]:'.format(type(o).__name__)
+        s = "[{0}]:".format(type(o).__name__)
         for k, v in o.__dict__.items():
-            s += '\n  - {0}({1}): {2}'.format(k, type(v).__name__, v)
+            s += "\n  - {0}({1}): {2}".format(k, type(v).__name__, 
+                                        v.isoformat() if isinstance(v, datetime) else v)
         return s.rstrip()
 
     @staticmethod
@@ -49,142 +52,159 @@ class TinyArgValidator():
         """if {arg} is null or empty, raise "ValueError" with specified {arg_name}"""
         if TinyArgValidator.isNullOrEmpty(arg):
             raise ValueError('you must specify "{}"'
-                .format(arg_name if arg_name is not None else ''))
+                .format(arg_name if arg_name else ''))
 
 class BasePrimitive:
     def __init__(self):
         pass
-
     def __str__(self):
         return EntityHelper.to_string(o=self)
-
     def to_json(self, indent=None):
         return EntityHelper.to_json(o=self, indent=indent)
 
 #----------------------------------------------------------
 
 class User(BasePrimitive):
-    def __init__(self, name, 
+    def __init__(self, user_id, name, 
                 email=None, phone=None, 
-                create_date=datetime.utcnow(), 
-                addresses=[]):
-        TinyArgValidator.notEmptyStr(name, 'user name')
+                create_date=datetime.utcnow(),
+                address_ids = []):
+        self.user_id = user_id
+        TinyArgValidator.notEmptyStr(name, "user name")
         self.name = name
         if email is None and phone is None:
                 raise EntityCreationError('you must specify an "email" or "phone"')
         self.email = email
         self.phone = phone
         self.create_date = create_date
-
-        self.addresses = [] 
-        if addresses is not None and len(addresses) > 0:
-             self.addresses.extend(addresses)
-        #if len(self.addresses) > 0 and not isinstance(self.addresses[0], )
-
+        self.address_ids = [] # список идетификаторов
+        if address_ids and len(address_ids) > 0:
+            self.address_ids.extend(address_ids)
 
 class UserEntity(db.Entity):
     _table_ = "User"
-    name = PrimaryKey(str, column='Name')
+    user_id = PrimaryKey(uuid.UUID, column="UserId", default=uuid.uuid4)
+    name = Required(str, column="Name")
     email = Optional(str, column="Email", nullable=True)
     phone = Optional(str, column="Phone", nullable=True)
-    create_date = Required(datetime, column='CreateDate', default=datetime.utcnow())
+    create_date = Required(datetime, column="CreateDate", default=datetime.utcnow())
     addresses = Set(lambda: AddressEntity)
 
-    @staticmethod
-    def create(name, email=None, phone=None):
+    @classmethod
+    def create(cls, name, 
+            user_id=uuid.uuid4(), 
+            email=None, phone=None, 
+            create_date=datetime.utcnow()):
         try:
-            TinyArgValidator.notEmptyStr(name, 'user name')
+            TinyArgValidator.notEmptyStr(name, "user name")
             if email is None and phone is None:
                 raise ValueError('you must specify an "email" or "phone"')
-
-            new_user = UserEntity(name=name, email=email, phone=phone)
+            new_user = UserEntity(user_id=user_id,
+                                name=name, 
+                                email=email, 
+                                phone=phone, 
+                                create_date=create_date)
             return new_user
         except Exception as e:
-            raise EntityCreationError('(UserEntity) ' + str(e), e)
+            raise EntityCreationError("({0}) {1}".format(cls.__name__, e), e)
 
     def map(self):
-        return User(name=self.name, 
-                    email=self.email, phone=self.phone,
+        # в address_ids передаем только идентификаторы
+        return User(user_id = self.user_id, 
+                    name=self.name, 
+                    email=self.email, 
+                    phone=self.phone,
                     create_date=self.create_date,
-                    addresses=[a.map() for a in self.addresses])
-
-    # def __str__(self):
-    #     rec = '' if self.email is None else self.email
-    #     if self.phone is not None:
-    #         rec += ('' if len(rec) == 0 else ', ') + self.phone
-    #     return '{0} | [{1}] | {2}'.format(self.name, rec, self.create_date.isoformat())
+                    address_ids=[a.address_id for a in self.addresses])
 
 #----------------------------------------------------------
 
-allowed_address_types = ['email', 'phone']
+allowed_address_types = ["email", "phone"]
 class Address(BasePrimitive):
-    def __init__(self, id, type_id, recipient,
-                user=None, channel=None):
-        self.id = id
-        if type_id is None or type_id not in allowed_address_types:
-            raise ValueError('allowed types is {}'.format(allowed_address_types))
+    def __init__(self, address_id, type_id, 
+                recipient, create_date=datetime.utcnow(),
+                user_id=None, channel_id=None):
+        self.address_id = address_id
+        if type_id not in allowed_address_types:
+            raise ValueError("allowed types is {}".format(allowed_address_types))
         self.type_id = type_id
-        TinyArgValidator.notEmptyStr(recipient, 'Address.recipient')
+        TinyArgValidator.notEmptyStr(recipient, "Address.recipient")
         self.recipient = recipient
-        # TODO: check arg type
-        self.user = user
-        self.channel = channel
-
+        self.create_date = create_date
+        # далее только идетификаторы! НЕ сущности!
+        self.user_id = user_id
+        self.channel_id = channel_id
 
 class AddressEntity(db.Entity):
     _table_ = "Address"
-    id = PrimaryKey(uuid.UUID, default=uuid.uuid4, column='AddressId')
+    address_id = PrimaryKey(uuid.UUID, column="AddressId", default=uuid.uuid4)
     type_id = Required(str, column="TypeId")
     recipient = Required(str, column="Recipient")
-    user = Optional(lambda: UserEntity, column="UserIdentificator")
-    channel = Optional(lambda: ChannelEntity)
+    create_date = Required(datetime, column="CreateDate", default=datetime.utcnow())
+    user = Optional(lambda: UserEntity, column="UserId")
+    channel = Optional(lambda: ChannelEntity, column="ChannelId")
 
-    @staticmethod
-    def create(type_id, recipient, user=None):
+    @classmethod
+    def create(cls, type_id, recipient, 
+            address_id=uuid.uuid4(),
+            create_date=datetime.utcnow(), 
+            user=None, channel=None):
         try:
-            if type_id is None or type_id not in allowed_address_types:
-                raise ValueError('allowed types is {}'.format(allowed_address_types))
-            TinyArgValidator.notEmptyStr(recipient, 'Address.recipient')
-            new_address = AddressEntity(type_id=type_id, recipient=recipient, user=user)
+            if type_id not in allowed_address_types:
+                raise ValueError("allowed types is {}".format(allowed_address_types))
+            TinyArgValidator.notEmptyStr(recipient, "Address.recipient")
+            new_address = AddressEntity(type_id=type_id, 
+                                        recipient=recipient, 
+                                        create_date=create_date, 
+                                        user=user, 
+                                        channel=channel)
             return new_address
         except Exception as e:
-            raise EntityCreationError('(AddressEntity) ' + str(e), e)
+            raise EntityCreationError("({0}) {1}".format(cls.__name__, e), e)
 
     def map(self):
-        return Address(id=self.id, type_id=self.type_id, recipient=self.recipient,
-                    user=self.user.map(), channel=self.channel.map())
+        return Address(address_id=self.address_id, 
+                        type_id=self.type_id, 
+                        recipient=self.recipient,
+                        create_date=self.create_date,
+                        user_id=self.user.user_id if self.user else None, 
+                        channel_id=self.channel.channel_id if self.channel else None)
 
 #----------------------------------------------------------
 
 class Channel(BasePrimitive):
-    def __init__(self, id, title, addresses=[]):
-        TinyArgValidator.notEmptyStr(id, 'Channel.id')
-        self.id = id
-        TinyArgValidator.notEmptyStr(title, 'Channel.title')
+    def __init__(self, channel_id, name, title, address_ids=[]):
+        self.channel_id = channel_id
+        TinyArgValidator.notEmptyStr(name, "Channel.name")
+        self.name = name
+        TinyArgValidator.notEmptyStr(title, "Channel.title")
         self.title = title
-        self.addresses = [] 
-        if addresses is not None and len(addresses) > 0:
-             self.addresses.extend(addresses)
+        self.address_ids = [] 
+        if address_ids and len(address_ids) > 0:
+             self.address_ids.extend(address_ids)
 
 class ChannelEntity(db.Entity):
-    _table_ = "NotificationChannel"
-    id = PrimaryKey(str, column='ChannelId')
-    title = Required(str, column="Title")
+    _table_ = "Channel"
+    channel_id = PrimaryKey(uuid.UUID, column="ChannelId", default=uuid.uuid4)
+    name = Required(str, column="Name")
+    title = Optional(str, column="Title", nullable=True)
     addresses = Set(lambda: AddressEntity)
 
-    @staticmethod
-    def create(id, title):
+    @classmethod
+    def create(cls, name, title=None, channel_id=uuid.uuid4()):
         try:
-            TinyArgValidator.notEmptyStr(id, 'Channel.id')
-            TinyArgValidator.notEmptyStr(title, 'Channel.title')
-            new_channel = ChannelEntity(id=id, title=title)
+            TinyArgValidator.notEmptyStr(name, "Channel.id")
+            TinyArgValidator.notEmptyStr(title, "Channel.title")
+            new_channel = ChannelEntity(channel_id=channel_id, name=name, title=title)
             return new_channel
         except Exception as e:
-            raise EntityCreationError('(AddressEntity) ' + str(e), e)
+            raise EntityCreationError("({0}) {1}".format(cls.__name__, e), e)
 
     def map(self):
-        return Channel(id=self.id, title=self.title, 
-                        addresses=[a.map() for a in self.addresses])
+        return Channel(channel_id=self.channel_id, 
+                        name=self.name,
+                        title=self.title, 
+                        address_ids=[a.address_id for a in self.addresses])
 
 #-------------------------------------------------------------
 class RepoFactory:
@@ -199,7 +219,7 @@ class RepoFactory:
 
 class NotificationRepo:
     def __init__(self, data_base=None, create_tables=False, debug=False):
-        self.db = data_base if data_base is not None else db
+        self.db = data_base if data_base else db
 
         if create_tables:
             self.db.generate_mapping(create_tables=create_tables)
@@ -215,12 +235,21 @@ class NotificationRepo:
                 email='some@email.com', 
                 phone='777')
 
+    # TODO: приукрутить логгер
+    def log_info(self, msg, *args, **kwargs):
+        if len(args) > 0:
+            msg = msg.format(*args)
+        else:
+            msg = msg.format(**kwargs)
+        print('{0} [INFO] {1}: {2}'.format(datetime.utcnow.isoformat(), 
+                                            self.__class__.__name__, 
+                                            msg))
     #-------------------------------------------------------
 
     @db_session
-    def get_user(self, name):
-        user = UserEntity.get(name=name)
-        return user.map()
+    def get_user(self, user_id):
+        user = UserEntity.get(user_id=user_id)
+        return user.map() if user else None
 
     @db_session
     def get_users(self):
@@ -229,18 +258,34 @@ class NotificationRepo:
 
     @db_session
     def add_user(self, name, email=None, phone=None):
-        user = self.get_user(name)
-        if user is None:
-            print('  create new user.')
-            user = UserEntity.create(name=name, email=email, phone=phone).map()
-        return user
+        """no exist check"""
+        user = UserEntity.create(name=name, email=email, phone=phone)
+        return user.map()
+        # user = self.get_user(name)
+        # if user is None:
+        #     user = UserEntity.create(name=name, email=email, phone=phone).map()
+        # else:
+        #     self.log_info('user with {0} is aready exists', name)
+        # return user
 
     @db_session
     def save_user(self, u):
-        """void method. expects User class instance."""
+        # TODO: добавить обновление полей для существующей записи
+        """void method. expects User class instance. check entity exists.\n
+        HAS NO UPDATE exist item (only add to context) !!!
+        """
         if not isinstance(u, User):
-            raise EntityCreationError('Repo.save_user(arg) - expects User class instance.')
-        UserEntity.create(name=u.name, email=u.email, phone=u.phone)
+            raise EntityCreationError("Repo.save_user(arg) - expects User class instance.")
+        e = self.get_user(user_id=u.user_id)
+        if e is None:
+            UserEntity.create(user_id=u.user_id,
+                                name=u.name, 
+                                email=u.email, 
+                                phone=u.phone, 
+                                create_date=u.create_date)
+        else:
+            self.log_info("user [{0}] is already exists", u.user_id)
 
     #-------------------------------------------------------
     # TODO: add methods for other entities
+    # TODO: addres & channel must user many-to-many relation!
