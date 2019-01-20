@@ -22,6 +22,9 @@ class EntityHelper:
             return str(obj)
         if isinstance(obj, Decimal):
             return str(obj)
+        if isinstance(obj, db.Entity):
+            q = json.dumps(obj.to_dict(), default=EntityHelper.json_convert_default)
+            return q
         return json.dumps(obj)
 
     @staticmethod
@@ -33,9 +36,10 @@ class EntityHelper:
         return s.rstrip()
 
     @staticmethod
-    def to_json(o, indent=None):
+    def to_json(o, indent=4):
+        x = isinstance(o, db.Entity)
         return json.dumps(
-            obj=o.__dict__, 
+            obj= o.to_dict() if x else o.__dict__, 
             default=EntityHelper.json_convert_default, 
             indent=indent)
 
@@ -419,3 +423,6 @@ class NotificationRepo:
         return addr.map()
     # TODO: add methods for other entities
     # TODO: addres & channel must user many-to-many relation!
+
+if __name__ == "__main__":
+    pass

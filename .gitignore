@@ -110,4 +110,3 @@ idea/
 vscode
 
 *.sqlite
-**/hiddentest.py
