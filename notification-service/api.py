@@ -40,6 +40,7 @@ user_fields = {
     'create_date': fields.DateTime(dt_format="iso8601"),
     'update_date': fields.DateTime(dt_format="iso8601"),
     'addresses': fields.List(fields.String),
+    # TODO: стоил выдавать ссылки на ресурс?
     'uri': fields.Url('user', absolute=True)
 }
 
@@ -51,7 +52,7 @@ class UserListAPI(Resource):
         self.reqparse.add_argument('name', type=str, required=True, location='json',
                                    help='No user name provided')
         self.reqparse.add_argument('email', type=str, default=None, location='json')
-        self.reqparse.add_argument('phone', type=str, default=None, location='json')                                   
+        self.reqparse.add_argument('phone', type=str, default=None, location='json')
         super().__init__()
 
     def get(self):
@@ -63,7 +64,17 @@ class UserListAPI(Resource):
     def post(self):
         args = self.reqparse.parse_args()
         with orm.db_session:
-            i = orm.UserEntity(name=args["name"], email=args["email"], phone=args["phone"])
+            n = args["name"]
+            e = args["email"]
+            p = args["phone"]
+            print(n, e, p)
+            c = orm.UserEntity.select(lambda u: u.name == n 
+                                        or u.email == e 
+                                        or u.phone == p
+                                ).count()
+            if c > 0:
+                abort(409) # TODO: заменить на abort_already_exists()
+            i = orm.UserEntity(name=n, email=e, phone=p)
             return {'user': marshal(i.to_dict(with_collections=True), user_fields)}, 201
             # return marshal(u.to_dict(with_collections=True), user_fields), 201
 
@@ -86,9 +97,7 @@ class UserAPI(Resource):
             return {'user': marshal(i.to_dict(with_collections=True), user_fields)}
             # return marshal(u.to_dict(with_collections=True), user_fields)
 
-    # def put(self, user_id):
-    #     pass # TODO: добавить обновление полейы (+связанные)
-
+    # def put(self, user_id): pass # TODO: добавить обновление полейы (+связанные)
 
 # -----------------------------------------------------------------
 
@@ -105,18 +114,79 @@ address_fields = {
 }
 class AddressListAPI(Resource):
     decorators = [auth.login_required]
-    # def __init__(self):
-    #     # self.reqparse = reqparse.RequestParser()
-    #     # self.reqparse.add_argument('type_id', type=str, required=True, location='json',
-    #     #                 help='No address type_id provided')
-    #     # self.reqparse.add_argument('recipient', type=str, required=True, location='json',
-    #     #                 help='No address recipient provided')
-    #     super(AddressListAPI, self).__init__()
+    def __init__(self):
+        self.reqparse = reqparse.RequestParser()
+        self.reqparse.add_argument('type_id', type=str, required=True, location='json',
+                        help='is empty or invalid (allowed: {0})'.format(orm.allowed_address_types), 
+                        choices=tuple(orm.allowed_address_types))
+        self.reqparse.add_argument('recipient', type=str, location='json')
+        self.reqparse.add_argument('user_id', type=orm.uuid.UUID, location='json')
+        super(AddressListAPI, self).__init__()
 
-    def get(self):
-        with orm.db_session:
-            i_list = [i.to_dict(with_collections=True) for i in orm.AddressEntity.select()]
-            return {'addresses': [marshal(i, address_fields) for i in i_list]}
+    def get(self, channel_id):
+        try:
+            with orm.db_session:
+                ch = orm.ChannelEntity[channel_id]
+                i_list = [i.to_dict(with_collections=True) for i in ch.addresses.select()]
+                return {
+                    'channel_id': str(channel_id),
+                    'count': len(i_list),
+                    'addresses': [marshal(i, address_fields) for i in i_list]
+                    }
+        except orm.ObjectNotFound:
+            abort(404)
+
+    def post(self, channel_id):
+        """создаем адрес внутри указанного канала"""
+        try:
+            args = self.reqparse.parse_args()
+            with orm.db_session:
+                # проверяем существование канала
+                ch = orm.ChannelEntity[channel_id]
+
+                # TODO: добавить возвожность добавлять адрес указывая список address_ids
+
+                rec = None
+                t = args['type_id']
+                u_id = args['user_id']
+                u = None
+                if u_id:
+                    # проверяем существование пользователя, если указан user_id
+                    u = orm.UserEntity.get(user_id=u_id)
+                    if not u:
+                        abort(404, {'message': 'user not found'})
+                    # получаем у пользователя адрес указанного типа 
+                    a = u.get_address_by_type(t)
+                    if a:
+                        rec = a.recipient
+                    else:
+                        abort(400, {'message': 'user address not found'})
+                else:
+                    # иначе берем получателя из body
+                    rec = args['recipient']
+
+                # проверяем не добавлен ли уже этот адрес в канал
+                # NOTE: для проверки наличия элемента в коллекции лучше юзать Set.count()
+                c = ch.addresses.select(lambda a: a.type_id == t 
+                                        and a.recipient == rec 
+                                        and (u is None or a.user == u)
+                                ).count()
+                if c > 0:
+                    abort(409, {'message': 'already exists'})
+
+                i = ch.addresses.create(type_id=t, recipient=rec, user=u)
+
+                res = i.to_dict(with_collections=True)
+                return {
+                    'channel_id': str(channel_id),
+                    # TODO: нужно ли здесь добавить uri на указанный channel ??
+                    'addresses': marshal(res, address_fields)
+                    }, 201
+        except orm.EntityCreationError as e:
+            abort(500, {'message': e.message})
+        except orm.ObjectNotFound as e:
+            abort(404)
+
 
 class AddressAPI(Resource):
     decorators = [auth.login_required]
@@ -162,7 +232,11 @@ class ChannelListAPI(Resource):
     def post(self):
         args = self.reqparse.parse_args()
         with orm.db_session:
-            i = orm.ChannelEntity(name=args["name"], description=args["description"])
+            n = args["name"]
+            ex_i = orm.ChannelEntity.get(name=n)
+            if ex_i:
+                abort(409) # channel already exists
+            i = orm.ChannelEntity(name=n, description=args["description"])
             return {'channel': marshal(i.to_dict(with_collections=True), channel_fields)}, 201
 
 class ChannelAPI(Resource):
@@ -179,6 +253,7 @@ class ChannelAPI(Resource):
 
 notification_fields = {
     'notification_id': fields.String,
+    'external_id': fields.String,
     'title': fields.String(),
     'text': fields.String,
     'create_date': fields.DateTime(dt_format="iso8601"),
@@ -196,30 +271,46 @@ class NotificationListAPI(Resource):
                         help='No notification title provided')
         self.reqparse.add_argument('text', type=str, required=True, location='json',
                         help='No notification text provided')
+        self.reqparse.add_argument('external_id', type=str, location='json')
         # TODO: добавить возможность указывать address_ids при создании уведомления
         super().__init__()
 
     def get(self, channel_id):
         try:
-            print('channel_id: {}'.format(channel_id))
             with orm.db_session:
                 ch = orm.ChannelEntity[channel_id]
                 i_list = [i.to_dict(with_collections=True) for i in ch.notifications.select()]
                 return {
                     'channel_id': str(channel_id), 
+                    'count': len(i_list),
                     'notifications': [marshal(i, notification_fields) for i in i_list]}
         except orm.ObjectNotFound:
             abort(404)
 
     def post(self, channel_id):
+        """создаем уведомление внутри указанного канала"""
         try:
+            #raise orm.EntityCreationError('my test messssssageeeeeeeee')
             args = self.reqparse.parse_args()
             with orm.db_session:
                 ch = orm.ChannelEntity[channel_id]
-                i = ch.create_notification(title=args['title'], text=args['text'])
-                return {'notification': marshal(i.to_dict(with_collections=True), notification_fields)}, 201
+
+                external_id = args['external_id']
+                if external_id:
+                    exist_n = ch.notifications.select(lambda n: n.external_id == external_id).first()
+                    if exist_n:
+                        # TODO: заменить abort(409) на кастомный метод, возвращающий json помимо StatusCode
+                        abort(409) 
+
+                t = args['title']
+                s = args['text']
+                #i = orm.NotificationEntity(external_id=external_id, title=t, text=s, channel=ch)
+                i = ch.notifications.create(external_id=external_id, title=t, text=s)
+
+                res = i.to_dict(with_collections=True)
+                return {'notification': marshal(res, notification_fields)}, 201
         except orm.EntityCreationError as e:
-            abort({'message': e.message}, 500)
+            abort(500, {'message': e.message})
         except orm.ObjectNotFound as e:
             abort(404)
 
@@ -239,7 +330,7 @@ class NotificationAPI(Resource):
 api.add_resource(UserListAPI, '/api/v1.0/users', endpoint='users')
 api.add_resource(UserAPI, '/api/v1.0/users/<uuid:user_id>', endpoint='user')
 
-api.add_resource(AddressListAPI, '/api/v1.0/addresses', endpoint='addresses')
+api.add_resource(AddressListAPI, '/api/v1.0/channels/<uuid:channel_id>/addresses', endpoint='addresses')
 api.add_resource(AddressAPI, '/api/v1.0/addresses/<uuid:address_id>', endpoint='address')
 
 api.add_resource(ChannelListAPI, '/api/v1.0/channels', endpoint='channels')
@@ -248,8 +339,27 @@ api.add_resource(ChannelAPI, '/api/v1.0/channels/<uuid:channel_id>', endpoint='c
 api.add_resource(NotificationListAPI, '/api/v1.0/channels/<uuid:channel_id>/notifications', endpoint='notifications')
 api.add_resource(NotificationAPI, '/api/v1.0/notifications/<uuid:notification_id>', endpoint='notification')
 
-# TODO: '/api/v1.0/channels/<uuid:channel_id>/addresses'
-# TODO: в сущностях где есть адреса - выводить адреса подробно, а не только address_id
+# TODO: в сущностях где есть адреса - выводить адреса подробно, а не только address_id (проблема с цикличностью)
+
+class IndexApi(Resource):
+    def __init__(self):
+        self.reqparse = reqparse.RequestParser()
+        self.reqparse.add_argument('list', type=list, location='json')
+        super().__init__()
+
+    def get(self):
+        return {
+            'timestamp': orm.datetime.utcnow().isoformat(),
+            'message': 'Salam'
+            }
+
+    def post(self):
+        args = self.reqparse.parse_args()
+        return {
+            'timestamp': orm.datetime.utcnow().isoformat(),
+            'args': args
+            }
+api.add_resource(IndexApi, '/api/v1.0/', endpoint='index')
 
 if __name__ == '__main__':
     app.run(debug=True)

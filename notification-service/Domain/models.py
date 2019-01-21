@@ -13,7 +13,9 @@ class DbInitor: # TODO: придумать нормальное название
     def seed():
         def_channel = ChannelEntity.get(name='default')
         if not def_channel:
-            def_channel = ChannelEntity(name='default', description='default channel')
+            # юзаем фиксированный uuid для default канала
+            ch_id = uuid.UUID('c64f941d-de0c-484d-8451-98747bbcc831')
+            def_channel = ChannelEntity(channel_id=ch_id, name='default', description='default channel')
 
         for i in range(1, 3):
             u_name = 'some_man_{0}'.format(i)
@@ -29,7 +31,7 @@ class EntityCreationError(OrmError):
     def __init__(self, message, inner=None, *args, **kwargs):
         self.message = message
         self.inner = inner
-        ValueError.__init__(self, message, *args, **kwargs)
+        super().__init__(message, *args, **kwargs)
 
 class EntityHelper:
     def_dumps_indent = 4
@@ -37,7 +39,7 @@ class EntityHelper:
 
     def_to_dict_with_collections = True
     to_dict_with_collections = True
-    
+
     to_dict_related_objects = False
     def_to_dict_related_objects = False
 
@@ -149,7 +151,7 @@ class UserEntity(db.Entity):
     # TODO: set user_id as bigint
     user_id = PrimaryKey(uuid.UUID, column="UserId", default=uuid.uuid4) 
     password_hash = Optional(str, column="PasswordHash", nullable=True)
-    name = Required(str, column="Name")
+    name = Required(str, column="Name", unique=True)
     email = Optional(str, column="Email", nullable=True)
     phone = Optional(str, column="Phone", nullable=True)
     create_date = Required(datetime, column="CreateDate", default=datetime.utcnow())
@@ -161,18 +163,21 @@ class UserEntity(db.Entity):
             m = '({0})you must specify an "email" or "phone"'
             raise EntityCreationError(m.format(self.__class__.__name__))
 
-    #@db_session
     def after_insert(self):
         """создаем адреса и добавляем их в default канал"""
         a_list = []
         if self.email and len(self.email) > 0:
-            a_list.append(AddressEntity(type_id="email", recipient=self.email, user=self))
+            a_list.append(self.addresses.create(type_id="email", recipient=self.email))
         if self.phone and len(self.phone) > 0:
-            a_list.append(AddressEntity(type_id="phone", recipient=self.phone, user=self))
+            a_list.append(self.addresses.create(type_id="phone", recipient=self.phone))
 
         def_channel = ChannelEntity.get(name='default')
         if def_channel:
             def_channel.addresses.add(a_list)
+
+    def get_address_by_type(self, type_id):
+        i = self.addresses.select(lambda a: a.type_id == type_id).first()
+        return i
 
     def update_email(self, new_email):
         # TODO: *
@@ -203,8 +208,10 @@ class AddressEntity(db.Entity):
                                 allowed_address_types))
 
     def update_recipient(self, new_recipient):
+        raise OrmError('update_recipient - is not implemented')
         # TODO: add validation
         self.recipient = new_recipient
+        # TODO: update user credentionals if need
         self.update_date = datetime.utcnow()
 
 #----------------------------------------------------------
@@ -219,23 +226,6 @@ class ChannelEntity(db.Entity):
     addresses = Set(lambda: AddressEntity)
     notifications = Set(lambda: NotificationEntity)
 
-    def create_notification(self, title, text,
-            notification_id=None, 
-            create_date=None):
-        # TODO: добавить параметр addresses. 
-        # т.е. если вдреса указаны снаружи, то отправляем только на них
-        # иначе сохраняем в notification адреса указзанные в самом канале
-        if not notification_id:
-            notification_id=uuid.uuid4()
-        if not create_date:
-            create_date = datetime.utcnow()
-        n = NotificationEntity(notification_id=notification_id,
-                                title=title,
-                                text=text,
-                                create_date=create_date,
-                                channel=self)
-        return n
-
 #-------------------------------------------------------------
 
 class NotificationEntity(db.Entity):
@@ -245,6 +235,7 @@ class NotificationEntity(db.Entity):
     """
     _table_ = "Notification"
     notification_id = PrimaryKey(uuid.UUID, column="NotificationId", default=uuid.uuid4)
+    external_id = Required(str, column="ExternalId", unique=True)
     title = Required(str, column="Title")
     text = Required(str, column="Text")
     create_date = Required(datetime, column="CreateDate", default=datetime.utcnow())
@@ -253,14 +244,19 @@ class NotificationEntity(db.Entity):
     messages = Set(lambda: MesaageEntity)
 
     def before_insert(self):
-        if (self.addresses and len(self.addresses) > 0) and self.channel:
-            c_name = self.__class__.__name__
-            err_msg = "you can not specify the addresses and channel at the same time"
-            raise EntityCreationError("({0}) - {1}".format(c_name, err_msg))
+        if len(self.external_id or '') == 0:
+            self.external_id = str(self.notification_id)
+        print('before_insert(notification)')
+        print('self.channel: ', self.channel)
+        print('self.addresses: ', self.addresses)
+        if self.channel and len(self.addresses) == 0:
+            if self.channel.addresses.count() > 0:
+                for a in self.channel.addresses.select():
+                    self.addresses.add(a)
 
-    def after_insert(self):
-        # TODO: здесь для каждого адреса нужно создать MesaageEntity
-        pass
+    # def after_insert(self):
+    #     # TODO: здесь для каждого адреса нужно создать MesaageEntity
+    #     pasraise EntityCreationError("not implemented")
 
 #-------------------------------------------------------------
 
@@ -276,15 +272,14 @@ class MesaageEntity(db.Entity):
     error_message = Optional(str, column="ErrorMessage")
     create_date = Required(datetime, column="CreateDate", default=datetime.utcnow())
     update_date = Required(datetime, column="UpdateDate", default=datetime.utcnow())
+    # спецом храним именно id пользователя, а не всю сущность
+    # для "отвязанных" адресов будет пустым
+    user_id = Optional(uuid.UUID, column="UserId", nullable=True)
     notification = Required(lambda: NotificationEntity, column="NotificationId")
 
-    def after_insert(self):
-        # TODO: здесь для каждого адреса нужно создать MesaageEntity
-        pass
-
     def send_bus_message(self, bus_message_sender=None):
-        # TODO: здесь отправляем в RabbitMQ
-        pass
+        # TODO: здесь отправляем в RabbitMQ, хотя лучше делать это НЕ здесь
+        raise EntityCreationError("not implemented")
 
     def set_state(self, new_state_id):
         if new_state_id not in allowed_message_state_ids:
