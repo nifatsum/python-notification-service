@@ -150,10 +150,10 @@ class UserEntity(db.Entity):
     _table_ = "User"
     # TODO: set user_id as bigint
     user_id = PrimaryKey(uuid.UUID, column="UserId", default=uuid.uuid4) 
-    password_hash = Optional(str, column="PasswordHash", nullable=True)
-    name = Required(str, column="Name", unique=True)
-    email = Optional(str, column="Email", nullable=True)
-    phone = Optional(str, column="Phone", nullable=True)
+    password_hash = Optional(str, column="PasswordHash", nullable=True, max_len=64)
+    name = Required(str, column="Name", unique=True, max_len=64)
+    email = Optional(str, column="Email", nullable=True, max_len=64)
+    phone = Optional(str, column="Phone", nullable=True, max_len=32)
     create_date = Required(datetime, column="CreateDate", default=datetime.utcnow())
     update_date = Required(datetime, column="UpdateDate", default=datetime.utcnow())
     addresses = Set(lambda: AddressEntity)
@@ -193,8 +193,8 @@ allowed_address_types = ["email", "phone"]
 class AddressEntity(db.Entity):
     _table_ = "Address"
     address_id = PrimaryKey(uuid.UUID, column="AddressId", default=uuid.uuid4)
-    type_id = Required(str, column="TypeId")
-    recipient = Required(str, column="Recipient")
+    type_id = Required(str, column="TypeId", max_len=16)
+    recipient = Required(str, column="Recipient", max_len=64)
     create_date = Required(datetime, column="CreateDate", default=datetime.utcnow())
     update_date = Required(datetime, column="UpdateDate", default=datetime.utcnow())
     user = Optional(lambda: UserEntity, column="UserId")
@@ -219,8 +219,8 @@ class AddressEntity(db.Entity):
 class ChannelEntity(db.Entity):
     _table_ = "Channel"
     channel_id = PrimaryKey(uuid.UUID, column="ChannelId", default=uuid.uuid4)
-    name = Required(str, column="Name", unique=True)
-    description = Optional(str, column="Description", nullable=True)
+    name = Required(str, column="Name", unique=True, max_len=64)
+    description = Optional(str, column="Description", nullable=True, max_len=512)
     create_date = Required(datetime, column="CreateDate", default=datetime.utcnow())
     update_date = Required(datetime, column="UpdateDate", default=datetime.utcnow())
     addresses = Set(lambda: AddressEntity)
@@ -235,9 +235,9 @@ class NotificationEntity(db.Entity):
     """
     _table_ = "Notification"
     notification_id = PrimaryKey(uuid.UUID, column="NotificationId", default=uuid.uuid4)
-    external_id = Required(str, column="ExternalId", unique=True)
-    title = Required(str, column="Title")
-    text = Required(str, column="Text")
+    external_id = Required(str, column="ExternalId", unique=True, max_len=64)
+    title = Required(str, column="Title", max_len=128)
+    text = Required(str, column="Text", max_len=1024)
     create_date = Required(datetime, column="CreateDate", default=datetime.utcnow())
     addresses = Set(lambda: AddressEntity)
     channel = Required(lambda: ChannelEntity, column="ChannelId")
@@ -264,12 +264,12 @@ allowed_message_state_ids = ["Created", "Processing", "Sent", "Error"]
 class MesaageEntity(db.Entity):
     _table_ = "NotificationMesaage"
     message_id = PrimaryKey(uuid.UUID, column="MessageId", default=uuid.uuid4)
-    title = Required(str, column="Title")
-    text = Required(str, column="Text")
-    recipient_type = Required(str, column="RecipientTypeId")
-    recipient = Required(str, column="Recipient")
-    state_id = Required(str, column="StateId", default="Created")
-    error_message = Optional(str, column="ErrorMessage")
+    title = Required(str, column="Title", max_len=128)
+    text = Required(str, column="Text", max_len=1024)
+    recipient_type = Required(str, column="RecipientTypeId", max_len=16)
+    recipient = Required(str, column="Recipient", max_len=64)
+    state_id = Required(str, column="StateId", default="Created", max_len=16)
+    error_message = Optional(str, column="ErrorMessage", max_len=512)
     create_date = Required(datetime, column="CreateDate", default=datetime.utcnow())
     update_date = Required(datetime, column="UpdateDate", default=datetime.utcnow())
     # спецом храним именно id пользователя, а не всю сущность
@@ -289,7 +289,6 @@ class MesaageEntity(db.Entity):
         self.state_id = new_state_id
         self.update_date = datetime.utcnow()
 
-# TODO: проставить max_len для строковых полей во всех сущностях
 if __name__ == "__main__":
     pass
     #db.bind(provider="sqlite", filename="notifications.sqlite", create_db=True)
