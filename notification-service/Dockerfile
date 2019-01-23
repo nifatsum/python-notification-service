@@ -8,6 +8,9 @@ RUN apt-get update
 RUN apt-get install -y git
 RUN apt-get install -y nano
 
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+
 COPY . /app
 WORKDIR /app
 
