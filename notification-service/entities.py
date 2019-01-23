@@ -1,8 +1,8 @@
 from decimal import Decimal
-from datetime import datetime, date
+import datetime as dt
 import uuid
 import json
-from pony.orm import *
+from pony.orm import db_session, Database, PrimaryKey, Required, Optional, OrmError, Set
 
 db = Database()
 default_bus_message_sender = None
@@ -54,7 +54,7 @@ class EntityHelper:
         ind = EntityHelper.dumps_indent or EntityHelper.def_dumps_indent
         convr = EntityHelper.converter or EntityHelper.default_json_converter
 
-        if isinstance(obj, datetime):
+        if isinstance(obj, dt.datetime):
             return obj.isoformat()
         if isinstance(obj, uuid.UUID):
             return str(obj)
@@ -124,7 +124,7 @@ class EntityHelper:
     def to_string(o):
         s = "[{0}]:".format(type(o).__name__)
         for k, v in o.__dict__.items():
-            is_date = isinstance(v, (datetime, date))
+            is_date = isinstance(v, (dt.datetime, dt.date))
             s += "\n  - {0} ({1}): {2}".format(k, type(v).__name__, 
                                         v.isoformat() if is_date else v)
         return s.rstrip()
@@ -154,8 +154,8 @@ class UserEntity(db.Entity):
     name = Required(str, column="Name", unique=True, max_len=64)
     email = Optional(str, column="Email", nullable=True, max_len=64)
     phone = Optional(str, column="Phone", nullable=True, max_len=32)
-    create_date = Required(datetime, column="CreateDate", default=datetime.utcnow())
-    update_date = Required(datetime, column="UpdateDate", default=datetime.utcnow())
+    create_date = Required(dt.datetime, column="CreateDate", default=dt.datetime.utcnow())
+    update_date = Required(dt.datetime, column="UpdateDate", default=dt.datetime.utcnow())
     addresses = Set(lambda: AddressEntity)
 
     def before_insert(self):
@@ -195,8 +195,8 @@ class AddressEntity(db.Entity):
     address_id = PrimaryKey(uuid.UUID, column="AddressId", default=uuid.uuid4)
     type_id = Required(str, column="TypeId", max_len=16)
     recipient = Required(str, column="Recipient", max_len=64)
-    create_date = Required(datetime, column="CreateDate", default=datetime.utcnow())
-    update_date = Required(datetime, column="UpdateDate", default=datetime.utcnow())
+    create_date = Required(dt.datetime, column="CreateDate", default=dt.datetime.utcnow())
+    update_date = Required(dt.datetime, column="UpdateDate", default=dt.datetime.utcnow())
     user = Optional(lambda: UserEntity, column="UserId")
     channels = Set(lambda: ChannelEntity)
     notifications = Set(lambda: NotificationEntity)
@@ -212,7 +212,7 @@ class AddressEntity(db.Entity):
         # TODO: add validation
         self.recipient = new_recipient
         # TODO: update user credentionals if need
-        self.update_date = datetime.utcnow()
+        self.update_date = dt.datetime.utcnow()
 
 #----------------------------------------------------------
 
@@ -221,8 +221,8 @@ class ChannelEntity(db.Entity):
     channel_id = PrimaryKey(uuid.UUID, column="ChannelId", default=uuid.uuid4)
     name = Required(str, column="Name", unique=True, max_len=64)
     description = Optional(str, column="Description", nullable=True, max_len=512)
-    create_date = Required(datetime, column="CreateDate", default=datetime.utcnow())
-    update_date = Required(datetime, column="UpdateDate", default=datetime.utcnow())
+    create_date = Required(dt.datetime, column="CreateDate", default=dt.datetime.utcnow())
+    update_date = Required(dt.datetime, column="UpdateDate", default=dt.datetime.utcnow())
     addresses = Set(lambda: AddressEntity)
     notifications = Set(lambda: NotificationEntity)
 
@@ -238,7 +238,7 @@ class NotificationEntity(db.Entity):
     external_id = Required(str, column="ExternalId", unique=True, max_len=64)
     title = Required(str, column="Title", max_len=128)
     text = Required(str, column="Text", max_len=1024)
-    create_date = Required(datetime, column="CreateDate", default=datetime.utcnow())
+    create_date = Required(dt.datetime, column="CreateDate", default=dt.datetime.utcnow())
     addresses = Set(lambda: AddressEntity)
     channel = Required(lambda: ChannelEntity, column="ChannelId")
     messages = Set(lambda: MesaageEntity)
@@ -270,8 +270,8 @@ class MesaageEntity(db.Entity):
     recipient = Required(str, column="Recipient", max_len=64)
     state_id = Required(str, column="StateId", default="Created", max_len=16)
     error_message = Optional(str, column="ErrorMessage", max_len=512)
-    create_date = Required(datetime, column="CreateDate", default=datetime.utcnow())
-    update_date = Required(datetime, column="UpdateDate", default=datetime.utcnow())
+    create_date = Required(dt.datetime, column="CreateDate", default=dt.datetime.utcnow())
+    update_date = Required(dt.datetime, column="UpdateDate", default=dt.datetime.utcnow())
     # спецом храним именно id пользователя, а не всю сущность
     # для "отвязанных" адресов будет пустым
     user_id = Optional(uuid.UUID, column="UserId", nullable=True)
@@ -287,7 +287,7 @@ class MesaageEntity(db.Entity):
                                                         self.__class__.__name__,
                                                         new_state_id))
         self.state_id = new_state_id
-        self.update_date = datetime.utcnow()
+        self.update_date = dt.datetime.utcnow()
 
 if __name__ == "__main__":
     pass

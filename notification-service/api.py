@@ -1,7 +1,7 @@
 from flask import Flask, jsonify, abort, make_response, request
 from flask_restful import Api, Resource, reqparse, fields, marshal
 from flask_httpauth import HTTPBasicAuth
-import Domain.models as orm
+import entities as orm
 
 orm.db.bind(provider="sqlite", filename="notifications.sqlite", create_db=True)
 orm.db.generate_mapping(create_tables=True)
