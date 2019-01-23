@@ -1,9 +1,10 @@
 from flask import Flask, jsonify, abort, make_response, request
 from flask_restful import Api, Resource, reqparse, fields, marshal
 from flask_httpauth import HTTPBasicAuth
-import entities as orm
+from datetime import datetime
+import src.entities as orm
 
-orm.db.bind(provider="sqlite", filename="notifications.sqlite", create_db=True)
+orm.db.bind(provider="sqlite", filename="./assets/notifications.sqlite", create_db=True)
 orm.db.generate_mapping(create_tables=True)
 orm.DbInitor.seed()
 
@@ -300,7 +301,7 @@ class NotificationListAPI(Resource):
                     exist_n = ch.notifications.select(lambda n: n.external_id == external_id).first()
                     if exist_n:
                         # TODO: заменить abort(409) на кастомный метод, возвращающий json помимо StatusCode
-                        abort(409) 
+                        abort(409, 'already exists') 
 
                 t = args['title']
                 s = args['text']
@@ -349,14 +350,14 @@ class IndexApi(Resource):
 
     def get(self):
         return {
-            'timestamp': orm.datetime.utcnow().isoformat(),
+            'timestamp': datetime.utcnow().isoformat(),
             'message': 'Salam'
             }
 
     def post(self):
         args = self.reqparse.parse_args()
         return {
-            'timestamp': orm.datetime.utcnow().isoformat(),
+            'timestamp': datetime.utcnow().isoformat(),
             'args': args
             }
 api.add_resource(IndexApi, '/api/v1.0/', endpoint='index')

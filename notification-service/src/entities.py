@@ -2,7 +2,7 @@ from decimal import Decimal
 import datetime as dt
 import uuid
 import json
-from pony.orm import db_session, Database, PrimaryKey, Required, Optional, OrmError, Set
+from pony.orm import db_session, Database, PrimaryKey, Required, Optional, OrmError, Set, ObjectNotFound
 
 db = Database()
 default_bus_message_sender = None
