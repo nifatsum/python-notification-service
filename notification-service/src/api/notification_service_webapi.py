@@ -1,16 +1,15 @@
-from flask import Flask, jsonify, abort, make_response, request
-from flask_restful import Api, Resource, reqparse, fields, marshal
-from flask_httpauth import HTTPBasicAuth
-from datetime import datetime
-import src.entities as orm
+from src.api import (jsonify, abort, make_response, request,
+                    Resource, reqparse, fields, marshal, 
+                    Flask, Api, HTTPBasicAuth, auth, orm)
 
-orm.db.bind(provider="sqlite", filename="./assets/notifications.sqlite", create_db=True)
+from src.api.user_model import UserAPI, UserListAPI
+
+orm.db.bind(provider="sqlite", filename="./../assets/notifications.sqlite", create_db=True)
 orm.db.generate_mapping(create_tables=True)
 orm.DbInitor.seed()
 
 app = Flask(__name__, static_url_path="")
 api = Api(app)
-auth = HTTPBasicAuth()
 
 @auth.get_password
 def get_password(username):
@@ -28,77 +27,6 @@ def unauthorized():
     # return 403 instead of 401 to prevent browsers from displaying the default
     # auth dialog
     return make_response(jsonify({'message': 'Unauthorized access'}), 403)
-
-# address_slim_fields = {
-#     'address_id': fields.String,
-#     'uri': fields.Url('address')
-# }
-user_fields = {
-    'user_id': fields.String,
-    'name': fields.String,
-    'email': fields.String,
-    'phone': fields.String,
-    'create_date': fields.DateTime(dt_format="iso8601"),
-    'update_date': fields.DateTime(dt_format="iso8601"),
-    'addresses': fields.List(fields.String),
-    # TODO: стоил выдавать ссылки на ресурс?
-    'uri': fields.Url('user', absolute=True)
-}
-
-class UserListAPI(Resource):
-    decorators = [auth.login_required]
-
-    def __init__(self):
-        self.reqparse = reqparse.RequestParser()
-        self.reqparse.add_argument('name', type=str, required=True, location='json',
-                                   help='No user name provided')
-        self.reqparse.add_argument('email', type=str, default=None, location='json')
-        self.reqparse.add_argument('phone', type=str, default=None, location='json')
-        super().__init__()
-
-    def get(self):
-        with orm.db_session:
-            i_list = [i.to_dict(with_collections=True) for i in orm.UserEntity.select()]
-            return {'users': [marshal(i, user_fields) for i in i_list] }
-            # return [marshal(u, user_fields) for u in u_list]
-
-    def post(self):
-        args = self.reqparse.parse_args()
-        with orm.db_session:
-            n = args["name"]
-            e = args["email"]
-            p = args["phone"]
-            print(n, e, p)
-            c = orm.UserEntity.select(lambda u: u.name == n 
-                                        or u.email == e 
-                                        or u.phone == p
-                                ).count()
-            if c > 0:
-                abort(409) # TODO: заменить на abort_already_exists()
-            i = orm.UserEntity(name=n, email=e, phone=p)
-            return {'user': marshal(i.to_dict(with_collections=True), user_fields)}, 201
-            # return marshal(u.to_dict(with_collections=True), user_fields), 201
-
-class UserAPI(Resource):
-    decorators = [auth.login_required]
-
-    def __init__(self):
-        self.reqparse = reqparse.RequestParser()
-        self.reqparse.add_argument('name', type=str, required=True, location='json',
-                                   help='No user name provided')
-        # self.reqparse.add_argument('email', type=str, default=None, location='json')
-        # self.reqparse.add_argument('phone', type=str, default=None, location='json')
-        super().__init__()
-
-    def get(self, user_id):
-        with orm.db_session:
-            i = orm.UserEntity.get(user_id=user_id)
-            if not i:
-                abort(404)
-            return {'user': marshal(i.to_dict(with_collections=True), user_fields)}
-            # return marshal(u.to_dict(with_collections=True), user_fields)
-
-    # def put(self, user_id): pass # TODO: добавить обновление полейы (+связанные)
 
 # -----------------------------------------------------------------
 
@@ -350,14 +278,14 @@ class IndexApi(Resource):
 
     def get(self):
         return {
-            'timestamp': datetime.utcnow().isoformat(),
+            'timestamp': datetime.datetime.utcnow().isoformat(),
             'message': 'Salam'
             }
 
     def post(self):
         args = self.reqparse.parse_args()
         return {
-            'timestamp': datetime.utcnow().isoformat(),
+            'timestamp': datetime.datetime.utcnow().isoformat(),
             'args': args
             }
 api.add_resource(IndexApi, '/api/v1.0/', endpoint='index')
