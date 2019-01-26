@@ -9,7 +9,8 @@ notification_fields = {
     #'update_date': fields.DateTime(dt_format="iso8601"),
     'addresses': fields.List(fields.String),
     'channel_id': fields.String(attribute='channel'),
-    'uri': fields.Url('notification', absolute=True)
+    'uri': fields.Url('notification', absolute=True),
+    'messages': fields.List(fields.String)
 }
 class NotificationListAPI(Resource):
     decorators = [auth.login_required]

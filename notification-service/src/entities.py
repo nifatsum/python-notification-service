@@ -33,7 +33,7 @@ class EntityCreationError(OrmError):
     def __init__(self, message, inner=None, *args, **kwargs):
         self.message = message
         self.inner = inner
-        super().__init__(message, *args, **kwargs)
+        super().__init__(message)
 
 class EntityHelper:
     def_dumps_indent = 4
@@ -251,21 +251,29 @@ class NotificationEntity(db.Entity):
     def before_insert(self):
         if len(self.external_id or '') == 0:
             self.external_id = str(self.notification_id)
-        print('before_insert(notification)')
-        print('self.channel: ', self.channel)
-        print('self.addresses: ', self.addresses)
-        if self.channel and len(self.addresses) == 0:
-            if self.channel.addresses.count() > 0:
-                for a in self.channel.addresses.select():
-                    self.addresses.add(a)
+        if len(self.addresses) == 0 and self.channel.addresses.count() > 0:
+            for a in self.channel.addresses.select():
+                self.addresses.add(a)
+        if len(self.addresses) == 0:
+            raise EntityCreationError("NotificationEntity - address list is empty")
 
-    # def after_insert(self):
-    #     # TODO: здесь для каждого адреса нужно создать MesaageEntity
-    #     pasraise EntityCreationError("not implemented")
+    def after_insert(self):
+        for a in self.addresses.select():
+            self.messages.create(title=self.title,
+                                text=self.text,
+                                recipient_type=a.type_id,
+                                recipient=a.recipient,
+                                address_id=a.address_id,
+                                user_id=a.user.user_id if a.user else None)
 
 #-------------------------------------------------------------
 
 allowed_message_state_ids = ["Created", "Processing", "Sent", "Error"]
+allowed_message_state_maps = {
+    "Created": ["Processing"],
+    "Processing": ["Sent", "Error"],
+    "Error": ["Processing"]
+}
 class MesaageEntity(db.Entity):
     _table_ = "NotificationMesaage"
     message_id = PrimaryKey(uuid.UUID, column="MessageId", default=uuid.uuid4)
@@ -277,8 +285,9 @@ class MesaageEntity(db.Entity):
     error_message = Optional(str, column="ErrorMessage", max_len=512)
     create_date = Required(dt.datetime, column="CreateDate", default=dt.datetime.utcnow())
     update_date = Required(dt.datetime, column="UpdateDate", default=dt.datetime.utcnow())
-    # спецом храним именно id пользователя, а не всю сущность
+    # спецом храним именно id пользователя и адреса, а не всю сущность
     # для "отвязанных" адресов будет пустым
+    address_id = Optional(uuid.UUID, column="AddressId", nullable=True)
     user_id = Optional(uuid.UUID, column="UserId", nullable=True)
     notification = Required(lambda: NotificationEntity, column="NotificationId")
 
@@ -287,10 +296,14 @@ class MesaageEntity(db.Entity):
         raise EntityCreationError("not implemented")
 
     def set_state(self, new_state_id):
+        prefix = '{0}[{1}].set_state()'.format(self.__class__.__name__, self.message_id)
         if new_state_id not in allowed_message_state_ids:
-            raise EntityCreationError('{0}.ser_state() - invalid state_id - {1}'.format(
-                                                        self.__class__.__name__,
-                                                        new_state_id))
+            raise OrmError('{0} - invalid state_id "{1}"'.format(prefix, new_state_id))
+        s_map = allowed_message_state_maps.get(self.state_id)
+        if not s_map or new_state_id not in s_map:
+            raise OrmError('{0} - can`t change state. ("{2}" -> "{3}")'.format(prefix, 
+                                                                                self.state_id, 
+                                                                                new_state_id))
         self.state_id = new_state_id
         self.update_date = dt.datetime.utcnow()
 
