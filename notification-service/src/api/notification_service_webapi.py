@@ -3,11 +3,7 @@ from src.api import (jsonify, abort, make_response, request,
                     Resource, reqparse, fields, marshal, 
                     Flask, Api, HTTPBasicAuth, auth, orm)
 
-from src.api.user_model import UserAPI, UserListAPI
-from src.api.address_model import AddressAPI, AddressListAPI
-from src.api.channel_model import ChannelAPI, ChannelListAPI
-from src.api.notification_model import NotificationAPI, NotificationListAPI
-from src.api.index_model import IndexApi
+from src.api.models import *
 
 orm.db.bind(provider="sqlite", filename="./../assets/notifications.sqlite", create_db=True)
 orm.db.generate_mapping(create_tables=True)
