@@ -41,6 +41,9 @@ api.add_resource(ChannelAPI, '/api/v1.0/channels/<uuid:channel_id>', endpoint='c
 api.add_resource(NotificationListAPI, '/api/v1.0/channels/<uuid:channel_id>/notifications', endpoint='notifications')
 api.add_resource(NotificationAPI, '/api/v1.0/notifications/<uuid:notification_id>', endpoint='notification')
 
+api.add_resource(MessageListAPI, '/api/v1.0/notifications/<uuid:notification_id>/messages', endpoint='messages')
+api.add_resource(MessageAPI, '/api/v1.0/messages/<uuid:message_id>', endpoint='message')
+
 api.add_resource(IndexApi, '/api/v1.0/', endpoint='index')
 
 # TODO: в сущностях где есть адреса - выводить адреса подробно, а не только address_id (проблема с цикличностью)
