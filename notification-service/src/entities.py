@@ -2,7 +2,9 @@ from decimal import Decimal
 import datetime as dt
 import uuid
 import json
-from pony.orm import db_session, Database, PrimaryKey, Required, Optional, OrmError, Set, ObjectNotFound
+from pony.orm import (db_session, Database, PrimaryKey, 
+                        Required, Optional, OrmError, 
+                        Set, ObjectNotFound, composite_key)
 
 db = Database()
 default_bus_message_sender = None
@@ -197,9 +199,12 @@ class AddressEntity(db.Entity):
     recipient = Required(str, column="Recipient", max_len=64)
     create_date = Required(dt.datetime, column="CreateDate", default=dt.datetime.utcnow())
     update_date = Required(dt.datetime, column="UpdateDate", default=dt.datetime.utcnow())
+
     user = Optional(lambda: UserEntity, column="UserId")
     channels = Set(lambda: ChannelEntity)
     notifications = Set(lambda: NotificationEntity)
+
+    composite_key(type_id, recipient)
 
     def before_insert(self):
         if self.type_id not in allowed_address_types:
@@ -210,9 +215,9 @@ class AddressEntity(db.Entity):
     def update_recipient(self, new_recipient):
         raise OrmError('update_recipient - is not implemented')
         # TODO: add validation
-        self.recipient = new_recipient
-        # TODO: update user credentionals if need
-        self.update_date = dt.datetime.utcnow()
+        # self.recipient = new_recipient
+        # # TODO: update user credentionals if need
+        # self.update_date = dt.datetime.utcnow()
 
 #----------------------------------------------------------
 
