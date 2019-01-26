@@ -7,6 +7,7 @@ from src.api.user_model import UserAPI, UserListAPI
 from src.api.address_model import AddressAPI, AddressListAPI
 from src.api.channel_model import ChannelAPI, ChannelListAPI
 from src.api.notification_model import NotificationAPI, NotificationListAPI
+from src.api.index_model import IndexApi
 
 orm.db.bind(provider="sqlite", filename="./../assets/notifications.sqlite", create_db=True)
 orm.db.generate_mapping(create_tables=True)
@@ -32,7 +33,6 @@ def unauthorized():
     # auth dialog
     return make_response(jsonify({'message': 'Unauthorized access'}), 403)
 
-# -----------------------------------------------------------------
 api.add_resource(UserListAPI, '/api/v1.0/users', endpoint='users')
 api.add_resource(UserAPI, '/api/v1.0/users/<uuid:user_id>', endpoint='user')
 
@@ -45,27 +45,9 @@ api.add_resource(ChannelAPI, '/api/v1.0/channels/<uuid:channel_id>', endpoint='c
 api.add_resource(NotificationListAPI, '/api/v1.0/channels/<uuid:channel_id>/notifications', endpoint='notifications')
 api.add_resource(NotificationAPI, '/api/v1.0/notifications/<uuid:notification_id>', endpoint='notification')
 
-# TODO: в сущностях где есть адреса - выводить адреса подробно, а не только address_id (проблема с цикличностью)
-
-class IndexApi(Resource):
-    def __init__(self):
-        self.reqparse = reqparse.RequestParser()
-        self.reqparse.add_argument('list', type=list, location='json')
-        super().__init__()
-
-    def get(self):
-        return {
-            'timestamp': datetime.utcnow().isoformat(),
-            'message': 'Salam'
-            }
-
-    def post(self):
-        args = self.reqparse.parse_args()
-        return {
-            'timestamp': datetime.utcnow().isoformat(),
-            'args': args
-            }
 api.add_resource(IndexApi, '/api/v1.0/', endpoint='index')
+
+# TODO: в сущностях где есть адреса - выводить адреса подробно, а не только address_id (проблема с цикличностью)
 
 if __name__ == '__main__':
     app.run(debug=True)
