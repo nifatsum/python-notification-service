@@ -7,7 +7,13 @@ from pony.orm import (db_session, Database, PrimaryKey,
                         Set, ObjectNotFound, composite_key)
 
 db = Database()
-default_bus_message_sender = None
+
+
+def use_default_binding_settings():
+    db.bind(provider="sqlite", filename="./assets/notifications.sqlite", create_db=True)
+    db.generate_mapping(create_tables=True)
+    DbInitor.seed()
+    print('default_binding_settings - is used')
 
 class DbInitor: # TODO: придумать нормальное название класса
     @staticmethod
@@ -295,17 +301,31 @@ class MesaageEntity(db.Entity):
         # TODO: здесь отправляем в RabbitMQ, хотя лучше делать это НЕ здесь
         raise EntityCreationError("not implemented")
 
-    def set_state(self, new_state_id):
+    def to_accepted_state(self, update_date=None):
+        self.__set_state('Sent', update_date=update_date)
+
+    def to_error_state(self, error_message, update_date=None):
+        self.__set_state('Error', error_message=error_message, update_date=update_date)
+
+    def to_processing(self, update_date=None):
+        self.__set_state('Processing', update_date=update_date)
+
+    def __set_state(self, new_state_id, update_date=None, error_message=None):
         prefix = '{0}[{1}].set_state()'.format(self.__class__.__name__, self.message_id)
         if new_state_id not in allowed_message_state_ids:
             raise OrmError('{0} - invalid state_id "{1}"'.format(prefix, new_state_id))
         s_map = allowed_message_state_maps.get(self.state_id)
         if not s_map or new_state_id not in s_map:
-            raise OrmError('{0} - can`t change state. ("{2}" -> "{3}")'.format(prefix, 
+            raise OrmError('{0} - can`t change state. ("{1}" -> "{2}")'.format(prefix, 
                                                                                 self.state_id, 
                                                                                 new_state_id))
+        if new_state_id == 'Error' and not error_message:
+            raise OrmError('{0} - "error_message" param is not specified.'.format(prefix))
+
+        if error_message:
+            self.error_message = error_message
         self.state_id = new_state_id
-        self.update_date = dt.datetime.utcnow()
+        self.update_date = update_date or dt.datetime.utcnow()
 
 if __name__ == "__main__":
     pass
