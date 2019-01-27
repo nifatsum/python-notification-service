@@ -56,6 +56,10 @@ class MessageConsumerRPC:
         self.__is_started = False
 
     def start(self):
+        t = threading.Thread(target=self._start)
+        t.start()
+
+    def _start(self):
         self.connection = pika.BlockingConnection(pika.ConnectionParameters(**self.config))
         self.channel = self.connection.channel()        
         self.queue = self.channel.queue_declare(queue=self.queue_name, durable=self.durable)
@@ -70,10 +74,9 @@ class MessageConsumerRPC:
                     if dto.is_test:
                         print('dto.is_test:', dto.is_test)
                     else:
-                        print('Try to send email!!!')
-                        # self.email_sender.send(recipients=dto.recipients, 
-                        #                     subject=dto.subject, 
-                        #                     plain_text=dto.body)
+                        self.email_sender.send(recipients=dto.recipients, 
+                                            subject=dto.subject, 
+                                            plain_text=dto.body)
                 else:
                     raise ValueError('Unsupported recipient_type: {0}.'.format(dto.recipient_type))
             except Exception as ex:
@@ -110,9 +113,7 @@ class MessageConsumerRPC:
 if __name__ == '__main__':
     import sys, threading
     c = MessageConsumerRPC()
-    #c.start()
-    t = threading.Thread(target=c.start)
-    t.start()
+    c.start()
 
     stop_words = ['q', 'exit', 'c', 'quit', 'cancel', 'abort']
     print('statrt check user input...')
