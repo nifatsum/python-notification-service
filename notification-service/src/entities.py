@@ -322,6 +322,7 @@ class MesaageEntity(db.Entity):
         if new_state_id == 'Error' and not error_message:
             raise OrmError('{0} - "error_message" param is not specified.'.format(prefix))
 
+        #print('set_state({0}): "{1}" --> "{2}"'.format(self.message_id, self.state_id, new_state_id))
         if error_message:
             self.error_message = error_message
         self.state_id = new_state_id

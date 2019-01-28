@@ -1,6 +1,6 @@
 import pika, uuid, time, json, threading
 from datetime import datetime, timedelta
-from entities import MesaageEntity, db_session, use_default_binding_settings
+#from src.entities import MesaageEntity, NotificationEntity, db_session, use_default_binding_settings
 
 def is_valid_uuid(uuid_to_test, version=4):
     """
@@ -77,10 +77,16 @@ class MessageRpcClient(object):
         self.queue_name = None
         self.exchange = None
         self.exchange_name = None
-        self.__is_started = False
 
         if auto_start:
             self.start()
+
+    def log_info(self, message, *args, **kwargs):
+        if len(args) > 0:
+            message = message.format(*args)
+        elif len(kwargs) > 0:
+            message = message.format(**kwargs)
+        print('{0}: {1}'.format(self.__class__.__name__, message))
 
     def start(self):
         t = threading.Thread(target=self._start)
@@ -89,7 +95,7 @@ class MessageRpcClient(object):
 
     def _start(self):
         try:
-            if self.__is_started:
+            if self.channel:
                 raise ValueError('MessageRpcClient - is already started')
 
             self.connection = pika.BlockingConnection(pika.ConnectionParameters(**self.config))
@@ -120,22 +126,22 @@ class MessageRpcClient(object):
                                         no_ack=self.no_ack,
                                         queue=self.callback_queue_name)
 
-            print('MessageRpcClient - start callback consuming...')
-            self.__is_started = True
-            while self.__is_started and self.connection:
+            self.log_info('start callback consuming...')
+            while self.connection and self.connection.is_open:
                 self.connection.process_data_events(time_limit=None)
-                print('connection.process_data_events(time_limit=None) !!!!!   !!!!!!   !!!!!!')
+                #self.log_info('connection.process_data_events(time_limit=None) !!!!!   !!!!!!   !!!!!!')
         except CallbackProcessingError as cpe:
+            self.log_info('_start() CONTINUE TO WORK !!! !!! !!! {0}', str(cpe))
             raise cpe
         except Exception as ex:
-            print('###', ex)
-            self._stop()
+            self.log_info('_start() FATAL ERORR !!! !!! !!!  {0}', str(ex))
+            self.stop()
             raise ex
 
     def on_response(self, ch, method, props, body):
         try:
             message_id = uuid.UUID(props.correlation_id)
-            print('receive callback for "{0}". body: {1}'.format(message_id, body))
+            self.log_info('receive callback for "{0}". body: {1}', message_id, body)
 
             def isoformat_to_datetime(dt_str):
                 dt, _, us= dt_str.partition(".")
@@ -147,7 +153,7 @@ class MessageRpcClient(object):
             resp = json.loads(body)
             error = resp.get('error')
             date = resp.get('date')
-            
+
             with db_session:
                 m = MesaageEntity[message_id]
                 u_date = isoformat_to_datetime(date)
@@ -155,47 +161,63 @@ class MessageRpcClient(object):
                     m.to_error_state(error_message=error, update_date=u_date)
                 else:
                     m.to_accepted_state(update_date=u_date)
-            
+
             if not self.no_ack:
                 self.channel.basic_ack(delivery_tag=method.delivery_tag)
         except Exception as ex:
             raise CallbackProcessingError(ex)
 
-    def _stop(self):
+    def stop(self):
         if self.channel:
-            # print('dispose channel')
             self.channel.stop_consuming()
             self.channel = None
-            # print('dispose channel - success')
 
         if self.connection:
-            # print('dispose connection')
             self.connection.close()
             self.connection = None
-            # print('dispose connection - success')
+        self.log_info('was stopped')
 
-        self.__is_started = False
-        print('MessageRpcClient - stopped')
+    def process_notification(self, notification_id, 
+                        is_test=None, 
+                        include_faliled=False, 
+                        all_unsuccess=False):
+        if not self.channel:
+            raise ValueError('MessageRpcClient - is not started')
 
-    def stop(self):
-        if self.__is_started:
-            self._stop()
+        if not isinstance(notification_id, uuid.UUID):
+            raise ValueError('MessageRpcClient - uuid is expected ofr param "notification_id"')
 
-    def send(self, message_id, is_test=None):
-        if not self.__is_started or not self.channel:
+        self.log_info('send messages for notification "{0}". (is_test: {1}, include_faliled: {2}, all_unsuccess: {3})', 
+                    notification_id, is_test, include_faliled, all_unsuccess)
+
+        created_messages_ids = None
+        with db_session:
+            n = NotificationEntity[notification_id]
+            created_messages_ids = [m.message_id for m in n.messages.select() if (all_unsuccess and m.state_id in ['Error', 'Created']) or (include_faliled and m.state_id == 'Error') or m.state_id == 'Created']
+
+        if created_messages_ids:
+            for m_id in created_messages_ids:
+                self.send_message(message_id=m_id, is_test=is_test)
+        self.log_info('{0} msgs was sended.', len(created_messages_ids))
+
+    def send_message(self, message_id, is_test=None):
+        if not self.channel:
             raise ValueError('MessageRpcClient - is not started')
 
         if isinstance(message_id, str):
             message_id = uuid.UUID(message_id)
-            print('{0}.send({1})  - parse "str" to uuid'.format(self.__class__.__name__, message_id))
+            self.log_info('send({0}) - parse "str" to uuid', message_id)
 
         msg_dict = {}
         with db_session:
             m = MesaageEntity[message_id]
             if m.state_id == 'Sent':
                 raise ValueError('message [{0}] - is already processed'.format(message_id))
+            elif m.state_id == 'Processing':
+                raise ValueError('message [{0}] - was is already sended to message broker'.format(message_id))
+            elif m.state_id in ['Error', 'Created']:
+                m.to_processing()
 
-            m.to_processing()
             msg_dict['recipient_type'] = m.recipient_type
             msg_dict['recipients'] = m.recipient
             msg_dict['subject'] = m.title
@@ -210,10 +232,13 @@ class MessageRpcClient(object):
                                          correlation_id=str(message_id)
                                          ),
                                    body=body_str)
-        print('publish message [{0}]. sended data: {1}'.format(message_id, body_str))
+        self.log_info('publish message [{0}]. sended data: {1}', message_id, body_str)
 
 
-if __name__ == '__main__':
+if __name__ != '__main__':
+    from src.entities import MesaageEntity, NotificationEntity, db_session, use_default_binding_settings
+else:
+    from entities import MesaageEntity, NotificationEntity, db_session, use_default_binding_settings
     import sys
     use_default_binding_settings()
     c = MessageRpcClient()
@@ -228,6 +253,7 @@ if __name__ == '__main__':
         c.stop()
         sys.exit(exit_code)
 
+    proc_notif_param = "-n "
     while True:
         try:
             print('enter message_id:')
@@ -238,10 +264,30 @@ if __name__ == '__main__':
             elif user_input in stop_words:
                 print('stop word catched !')
                 dispose_and_exit(1)
+            elif user_input.startswith(proc_notif_param):
+                user_input = user_input.replace(proc_notif_param, '').strip()
+
+                all_unsuccess = False
+                all_unsuccess_param = '--all'
+                if all_unsuccess_param in user_input:
+                    user_input = user_input.replace(all_unsuccess_param, '').strip()
+                    all_unsuccess = True
+
+                include_faliled = False
+                include_faliled_param = '--failed'
+                if include_faliled_param in user_input:
+                    user_input = user_input.replace(include_faliled_param, '').strip()
+                    include_faliled = True
+
+                notification_id = uuid.UUID(user_input)
+                c.process_notification(notification_id=notification_id,
+                                    is_test=True, 
+                                    include_faliled=include_faliled,
+                                    all_unsuccess=all_unsuccess)
             else:
-                c.send(message_id=user_input, is_test=True)
+                c.send_message(message_id=user_input, is_test=True)
         except Exception as ex:
-            print('Exception {0}: {1}'.format(type(ex).__name__, ex))
+            print('@@ Exception {0}: {1}'.format(type(ex).__name__, ex))
         except KeyboardInterrupt:
-            print('KeyboardInterrupt')
+            print('@@ KeyboardInterrupt')
             dispose_and_exit(0)
