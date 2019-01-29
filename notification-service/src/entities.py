@@ -7,7 +7,13 @@ from pony.orm import (db_session, Database, PrimaryKey,
                         Set, ObjectNotFound, composite_key)
 
 db = Database()
-default_bus_message_sender = None
+
+
+def use_default_binding_settings():
+    db.bind(provider="sqlite", filename="./assets/notifications.sqlite", create_db=True)
+    db.generate_mapping(create_tables=True)
+    DbInitor.seed()
+    print('default_binding_settings - is used')
 
 class DbInitor: # TODO: придумать нормальное название класса
     @staticmethod
@@ -19,15 +25,16 @@ class DbInitor: # TODO: придумать нормальное название
             ch_id = uuid.UUID('c64f941d-de0c-484d-8451-98747bbcc831')
             def_channel = ChannelEntity(channel_id=ch_id, name='default', description='default channel')
 
-        for i in range(1, 3):
-            u_name = 'some_man_{0}'.format(i)
-            u = UserEntity.get(name=u_name)
-            if u:
-                continue
-
-            e = 'user{0}@email.com'.format(i)
-            p = '7922{0}'.format(str(i)*7)
-            UserEntity(name=u_name, email=e, phone=p)
+        test_email_list = ['v1jprivzlrno@yandex.ru', 'v1jprivzlrno@mail.ru']
+        if not UserEntity.exists():
+            for i in range(0, len(test_email_list)):
+                u_name = 'some_man_{0}'.format(i+1)
+                u = UserEntity.get(name=u_name)
+                if u:
+                    continue
+                e = test_email_list[i]
+                p = None # '7922{0}'.format(str(i)*7)
+                UserEntity(name=u_name, email=e, phone=p)
 
 class EntityCreationError(OrmError):
     def __init__(self, message, inner=None, *args, **kwargs):
@@ -295,17 +302,32 @@ class MesaageEntity(db.Entity):
         # TODO: здесь отправляем в RabbitMQ, хотя лучше делать это НЕ здесь
         raise EntityCreationError("not implemented")
 
-    def set_state(self, new_state_id):
+    def to_accepted_state(self, update_date=None):
+        self.__set_state('Sent', update_date=update_date)
+
+    def to_error_state(self, error_message, update_date=None):
+        self.__set_state('Error', error_message=error_message, update_date=update_date)
+
+    def to_processing(self, update_date=None):
+        self.__set_state('Processing', update_date=update_date)
+
+    def __set_state(self, new_state_id, update_date=None, error_message=None):
         prefix = '{0}[{1}].set_state()'.format(self.__class__.__name__, self.message_id)
         if new_state_id not in allowed_message_state_ids:
             raise OrmError('{0} - invalid state_id "{1}"'.format(prefix, new_state_id))
         s_map = allowed_message_state_maps.get(self.state_id)
         if not s_map or new_state_id not in s_map:
-            raise OrmError('{0} - can`t change state. ("{2}" -> "{3}")'.format(prefix, 
+            raise OrmError('{0} - can`t change state. ("{1}" -> "{2}")'.format(prefix, 
                                                                                 self.state_id, 
                                                                                 new_state_id))
+        if new_state_id == 'Error' and not error_message:
+            raise OrmError('{0} - "error_message" param is not specified.'.format(prefix))
+
+        #print('set_state({0}): "{1}" --> "{2}"'.format(self.message_id, self.state_id, new_state_id))
+        if error_message:
+            self.error_message = error_message
         self.state_id = new_state_id
-        self.update_date = dt.datetime.utcnow()
+        self.update_date = update_date or dt.datetime.utcnow()
 
 if __name__ == "__main__":
     pass

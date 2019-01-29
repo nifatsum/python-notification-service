@@ -1,4 +1,4 @@
-from src.api import fields, auth, Resource, reqparse, marshal, abort, orm
+from src.api import fields, auth, Resource, reqparse, marshal, abort, orm, rpc_client
 
 notification_fields = {
     'notification_id': fields.String,
@@ -40,7 +40,6 @@ class NotificationListAPI(Resource):
     def post(self, channel_id):
         """создаем уведомление внутри указанного канала"""
         try:
-            #raise orm.EntityCreationError('my test messssssageeeeeeeee')
             args = self.reqparse.parse_args()
             with orm.db_session:
                 ch = orm.ChannelEntity[channel_id]
@@ -54,8 +53,10 @@ class NotificationListAPI(Resource):
 
                 t = args['title']
                 s = args['text']
-                #i = orm.NotificationEntity(external_id=external_id, title=t, text=s, channel=ch)
+
                 i = ch.notifications.create(external_id=external_id, title=t, text=s)
+
+                rpc_client.process_notification(notification_id=i.notification_id)
 
                 res = i.to_dict(with_collections=True)
                 return {'notification': marshal(res, notification_fields)}, 201
