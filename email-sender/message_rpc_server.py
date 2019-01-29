@@ -2,7 +2,7 @@ import pika, json
 from datetime import datetime
 from email_sender import EmailSender
 
-
+# TODO: заменить на "namedtuple"
 class DTOMessage(object):
     def __init__(self, recipient_type, recipients, subject, message, is_test=None):
         self.recipient_type = recipient_type
@@ -53,7 +53,13 @@ class MessageConsumerRPC:
         self.channel = None
         self.queue = None
         self.email_sender = EmailSender()
-        self.__is_started = False
+
+    def log_info(self, message, *args, **kwargs):
+        if len(args) > 0:
+            message = message.format(*args)
+        elif len(kwargs) > 0:
+            message = message.format(**kwargs)
+        print('{0}: {1}'.format(self.__class__.__name__, message))
 
     def start(self):
         t = threading.Thread(target=self._start)
@@ -66,13 +72,13 @@ class MessageConsumerRPC:
         self.channel.basic_qos(prefetch_count=1)
 
         def on_request(ch, method, props, body):
-            print('on_request body: ', body)
+            self.log_info('on_request body: {0}', body)
             dto = json.loads(body, object_hook=DTOMessage.from_dict)
             resp = { 'success': True }
             try:
                 if dto.recipient_type == 'email':
                     if dto.is_test:
-                        print('dto.is_test:', dto.is_test)
+                        self.log_info('dto.is_test: {0}', dto.is_test)
                     else:
                         self.email_sender.send(recipients=dto.recipients, 
                                             subject=dto.subject, 
@@ -89,25 +95,33 @@ class MessageConsumerRPC:
                             properties=pika.BasicProperties(correlation_id=props.correlation_id),
                             body=callback_body)
             ch.basic_ack(delivery_tag=method.delivery_tag)
-            print('process message "{0}". sended callback data: {1}'.format(props.correlation_id, callback_body))
+            self.log_info('process message "{0}". sended callback data: {1}', props.correlation_id, callback_body)
         
         self.channel.basic_consume(on_request, queue=self.queue_name)
 
-        self.__is_started = True
-        print("{0} - Awaiting RPC requests".format(self.__class__.__name__))
-        while self.__is_started:
-            self.connection.process_data_events(time_limit=None)
-        
+        self.log_info("Awaiting RPC requests")
         #self.channel.start_consuming()
+        while self.connection and self.connection.is_open:
+            self.connection.process_data_events(time_limit=None)
 
     def stop(self):
-        self.channel.stop_consuming()
-        self.channel.close()
+        try:
+            self.channel.stop_consuming()
+        except Exception as ex:
+            self.log_info('channel.stop_consuming() error: {0}', str(ex))
+
+        try:
+            self.channel.close()            
+        except Exception as ex:
+            self.log_info('channel.close() error: {0}', str(ex))
         self.channel = None
-        self.connection.close()
+
+        try:
+            self.connection.close()            
+        except Exception as ex:
+            self.log_info('connection.close() error: {0}', str(ex))
         self.connection = None
-        self.__is_started = False
-        print("{0} - was stopped".format(self.__class__.__name__))
+        self.log_info("was stopped")
 
 
 if __name__ == '__main__':
