@@ -29,6 +29,13 @@ def is_valid_uuid(uuid_to_test, version=4):
 
     return str(uuid_obj) == uuid_to_test
 
+def isoformat_to_datetime(dt_str):
+    dt, _, us= dt_str.partition(".")
+    dt= datetime.strptime(dt, "%Y-%m-%dT%H:%M:%S")
+    us= int(us.rstrip("Z"), 10)
+    res = dt + timedelta(microseconds=us)
+    return res
+
 default_rabbit_config = { 
     # 'credentials': { 'username':'dev', 'password':'dev' },
     'queue': { 'queue': 'notification_message_rpc', 'durable': True },
@@ -81,6 +88,7 @@ class MessageRpcClient(object):
         if auto_start:
             self.start()
 
+    # TODO: прикрутить во всем проекте нормальный логгер. например loguru
     def log_info(self, message, *args, **kwargs):
         if len(args) > 0:
             message = message.format(*args)
@@ -143,17 +151,12 @@ class MessageRpcClient(object):
             message_id = uuid.UUID(props.correlation_id)
             self.log_info('receive callback for "{0}". body: {1}', message_id, body)
 
-            def isoformat_to_datetime(dt_str):
-                dt, _, us= dt_str.partition(".")
-                dt= datetime.strptime(dt, "%Y-%m-%dT%H:%M:%S")
-                us= int(us.rstrip("Z"), 10)
-                res = dt + timedelta(microseconds=us)
-                return res
-
             resp = json.loads(body)
             error = resp.get('error')
             date = resp.get('date')
 
+            # TODO: по хорошему MessageRpcClient не должен знать о сущностях в БД
+            # и сюда надо пробрасывать делегат
             with db_session:
                 m = MesaageEntity[message_id]
                 u_date = isoformat_to_datetime(date)
