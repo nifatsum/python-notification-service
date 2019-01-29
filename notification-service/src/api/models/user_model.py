@@ -1,4 +1,4 @@
-from src.api import fields, auth, Resource, reqparse, marshal, abort, orm
+from src.api import fields, auth, Resource, reqparse, marshal, abort, orm, Response
 
 user_fields = {
     'user_id': fields.String,
@@ -50,9 +50,9 @@ class UserAPI(Resource):
     decorators = [auth.login_required]
 
     def __init__(self):
-        self.reqparse = reqparse.RequestParser()
-        self.reqparse.add_argument('name', type=str, required=True, location='json',
-                                   help='No user name provided')
+        # self.reqparse = reqparse.RequestParser()
+        # self.reqparse.add_argument('name', type=str, required=True, location='json',
+        #                            help='No user name provided')
         # self.reqparse.add_argument('email', type=str, default=None, location='json')
         # self.reqparse.add_argument('phone', type=str, default=None, location='json')
         super().__init__()
@@ -63,6 +63,14 @@ class UserAPI(Resource):
             if not i:
                 abort(404)
             return {'user': marshal(i.to_dict(with_collections=True), user_fields)}
-            # return marshal(u.to_dict(with_collections=True), user_fields)
+
+    def delete(self, user_id):
+        with orm.db_session:
+            i = orm.UserEntity.get(user_id=user_id)
+            if not i:
+                abort(404)
+            i.delete()
+            return Response(status=200)
+
 
     # def put(self, user_id): pass # TODO: добавить обновление полейы (+связанные)

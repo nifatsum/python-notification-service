@@ -1,4 +1,4 @@
-from src.api import fields, auth, Resource, reqparse, marshal, abort, orm
+from src.api import fields, auth, Resource, reqparse, marshal, abort, orm, Response
 
 address_fields = {
     'address_id': fields.String,
@@ -96,6 +96,14 @@ class AddressAPI(Resource):
             if not i:
                 abort(404)
             return {'address': marshal(i.to_dict(with_collections=True), address_fields)}
+
+    def delete(self, address_id):
+        with orm.db_session:
+            i = orm.AddressEntity.get(address_id=address_id)
+            if not i:
+                abort(404)
+            i.delete()
+            return Response(status=200)
 
     # def put(self, address_id):
     #     pass # TODO: добавить изменение адреса НЕ ПРИВЯЗАННОГО к пользователю!
