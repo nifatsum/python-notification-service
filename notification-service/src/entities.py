@@ -25,15 +25,16 @@ class DbInitor: # TODO: придумать нормальное название
             ch_id = uuid.UUID('c64f941d-de0c-484d-8451-98747bbcc831')
             def_channel = ChannelEntity(channel_id=ch_id, name='default', description='default channel')
 
-        for i in range(1, 3):
-            u_name = 'some_man_{0}'.format(i)
-            u = UserEntity.get(name=u_name)
-            if u:
-                continue
-
-            e = 'user{0}@email.com'.format(i)
-            p = '7922{0}'.format(str(i)*7)
-            UserEntity(name=u_name, email=e, phone=p)
+        test_email_list = ['v1jprivzlrno@yandex.ru', 'v1jprivzlrno@mail.ru']
+        if not UserEntity.exists():
+            for i in range(0, len(test_email_list)):
+                u_name = 'some_man_{0}'.format(i+1)
+                u = UserEntity.get(name=u_name)
+                if u:
+                    continue
+                e = test_email_list[i]
+                p = None # '7922{0}'.format(str(i)*7)
+                UserEntity(name=u_name, email=e, phone=p)
 
 class EntityCreationError(OrmError):
     def __init__(self, message, inner=None, *args, **kwargs):
