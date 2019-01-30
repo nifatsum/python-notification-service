@@ -49,9 +49,16 @@ default_rabbit_config = {
     'no_ack': False
     }
 
-class CallbackProcessingError(Exception):
-    def __init__(self, inner):
+class MessageRpcClientError(Exception):
+    def __init__(self, message, inner=None):
+        self.message = message
         self.inner = inner
+        Exception.__init__(inner)
+
+class CallbackProcessingError(MessageRpcClientError):
+    def __init__(self, inner):
+        super().__init__(message=str(inner), inner=inner)
+
     def __str__(self):
         return 'inner({0}) - {1}'.format(type(self.inner).__name__, 
                                         str(self.inner))
@@ -106,38 +113,44 @@ class MessageRpcClient(object):
             if self.channel:
                 raise ValueError('MessageRpcClient - is already started')
 
-            self.connection = pika.BlockingConnection(pika.ConnectionParameters(**self.config))
+            try:
+                self.connection = pika.BlockingConnection(pika.ConnectionParameters(**self.config))
 
-            self.channel = self.connection.channel()
-            if self.prefetch_count:
-                self.channel.basic_qos(prefetch_count=self.prefetch_count)
+                self.channel = self.connection.channel()
+                if self.prefetch_count:
+                    self.channel.basic_qos(prefetch_count=self.prefetch_count)
 
-            self.callback_queue = self.channel.queue_declare(**self.callback_queue_params)
-            self.callback_queue_name = self.callback_queue.method.queue
+                self.callback_queue = self.channel.queue_declare(**self.callback_queue_params)
+                self.callback_queue_name = self.callback_queue.method.queue
 
-            if self.queue_params:
-                self.queue = self.channel.queue_declare(**self.queue_params)
-                self.queue_name = self.queue.method.queue
-            if self.exchange_params:
-                self.exchange = self.channel.exchange_declare(**self.exchange_params)
-                self.exchange_name = self.exchange_params['exchange']
-                self.exchange_type = self.exchange_params['exchange_type']
+                if self.queue_params:
+                    self.queue = self.channel.queue_declare(**self.queue_params)
+                    self.queue_name = self.queue.method.queue
+                if self.exchange_params:
+                    self.exchange = self.channel.exchange_declare(**self.exchange_params)
+                    self.exchange_name = self.exchange_params['exchange']
+                    self.exchange_type = self.exchange_params['exchange_type']
 
-            # (опциоанльно) биндим основную очередь и обменник, если их параметры указаны
-            if self.queue and self.exchange:
-                r_key = self.routing_key if self.exchange_type != 'fanout' else ''
-                self.channel.queue_bind(queue=self.queue_name, 
-                                        exchange=self.exchange_name,
-                                        routing_key=r_key)
+                # (опциоанльно) биндим основную очередь и обменник, если их параметры указаны
+                if self.queue and self.exchange:
+                    r_key = self.routing_key if self.exchange_type != 'fanout' else ''
+                    self.channel.queue_bind(queue=self.queue_name, 
+                                            exchange=self.exchange_name,
+                                            routing_key=r_key)
 
-            self.channel.basic_consume(consumer_callback=self.on_response, 
-                                        no_ack=self.no_ack,
-                                        queue=self.callback_queue_name)
+                self.channel.basic_consume(consumer_callback=self.on_response, 
+                                            no_ack=self.no_ack,
+                                            queue=self.callback_queue_name)
+            except pika.exceptions.AMQPError as ex:
+                self.log_info('AMQPError: {0}', str(ex))
+                self.connection = None
+                raise ex
 
-            self.log_info('start callback consuming...')
-            while self.connection and self.connection.is_open:
-                self.connection.process_data_events(time_limit=None)
-                #self.log_info('connection.process_data_events(time_limit=None) !!!!!   !!!!!!   !!!!!!')
+            if self.connection:
+                self.log_info('start callback consuming...')
+                while self.connection and self.connection.is_open:
+                    self.connection.process_data_events(time_limit=None)
+                    #self.log_info('connection.process_data_events(time_limit=None) !!!!!   !!!!!!   !!!!!!')
         except CallbackProcessingError as cpe:
             self.log_info('_start() CONTINUE TO WORK !!! !!! !!! {0}', str(cpe))
             raise cpe
@@ -184,58 +197,64 @@ class MessageRpcClient(object):
                         is_test=None, 
                         include_faliled=False, 
                         all_unsuccess=False):
-        if not self.channel:
-            raise ValueError('MessageRpcClient - is not started')
+        try:
+            if not self.channel:
+                raise ValueError('MessageRpcClient - is not started')
 
-        if not isinstance(notification_id, uuid.UUID):
-            raise ValueError('MessageRpcClient - uuid is expected ofr param "notification_id"')
+            if not isinstance(notification_id, uuid.UUID):
+                raise ValueError('MessageRpcClient - uuid is expected ofr param "notification_id"')
 
-        self.log_info('send messages for notification "{0}". (is_test: {1}, include_faliled: {2}, all_unsuccess: {3})', 
-                    notification_id, is_test, include_faliled, all_unsuccess)
+            self.log_info('send messages for notification "{0}". (is_test: {1}, include_faliled: {2}, all_unsuccess: {3})', 
+                        notification_id, is_test, include_faliled, all_unsuccess)
 
-        created_messages_ids = None
-        with db_session:
-            n = NotificationEntity[notification_id]
-            created_messages_ids = [m.message_id for m in n.messages.select() if (all_unsuccess and m.state_id in ['Error', 'Created']) or (include_faliled and m.state_id == 'Error') or m.state_id == 'Created']
+            created_messages_ids = None
+            with db_session:
+                n = NotificationEntity[notification_id]
+                created_messages_ids = [m.message_id for m in n.messages.select() if (all_unsuccess and m.state_id in ['Error', 'Created']) or (include_faliled and m.state_id == 'Error') or m.state_id == 'Created']
 
-        if created_messages_ids:
-            for m_id in created_messages_ids:
-                self.send_message(message_id=m_id, is_test=is_test)
-        self.log_info('{0} msgs was sended.', len(created_messages_ids))
+            if created_messages_ids:
+                for m_id in created_messages_ids:
+                    self.send_message(message_id=m_id, is_test=is_test)
+            self.log_info('{0} msgs was sended.', len(created_messages_ids))
+        except Exception as e:
+            raise MessageRpcClientError(str(e), e)
 
     def send_message(self, message_id, is_test=None):
-        if not self.channel:
-            raise ValueError('MessageRpcClient - is not started')
+        try:
+            if not self.channel:
+                raise ValueError('MessageRpcClient - is not started')
 
-        if isinstance(message_id, str):
-            message_id = uuid.UUID(message_id)
-            self.log_info('send({0}) - parse "str" to uuid', message_id)
+            if isinstance(message_id, str):
+                message_id = uuid.UUID(message_id)
+                self.log_info('send({0}) - parse "str" to uuid', message_id)
 
-        msg_dict = {}
-        with db_session:
-            m = MesaageEntity[message_id]
-            if m.state_id == 'Sent':
-                raise ValueError('message [{0}] - is already processed'.format(message_id))
-            elif m.state_id == 'Processing':
-                raise ValueError('message [{0}] - was is already sended to message broker'.format(message_id))
-            elif m.state_id in ['Error', 'Created']:
-                m.to_processing()
+            msg_dict = {}
+            with db_session:
+                m = MesaageEntity[message_id]
+                if m.state_id == 'Sent':
+                    raise ValueError('message [{0}] - is already processed'.format(message_id))
+                elif m.state_id == 'Processing':
+                    raise ValueError('message [{0}] - was is already sended to message broker'.format(message_id))
+                elif m.state_id in ['Error', 'Created']:
+                    m.to_processing()
 
-            msg_dict['recipient_type'] = m.recipient_type
-            msg_dict['recipients'] = m.recipient
-            msg_dict['subject'] = m.title
-            msg_dict['message'] = m.text
-            if is_test:
-                msg_dict['is_test'] = True
-        body_str = json.dumps(msg_dict)
-        self.channel.basic_publish(exchange=self.exchange_name,
-                                   routing_key=self.routing_key,
-                                   properties=pika.BasicProperties(
-                                         reply_to=self.callback_queue_name,
-                                         correlation_id=str(message_id)
-                                         ),
-                                   body=body_str)
-        self.log_info('publish message [{0}]. sended data: {1}', message_id, body_str)
+                msg_dict['recipient_type'] = m.recipient_type
+                msg_dict['recipients'] = m.recipient
+                msg_dict['subject'] = m.title
+                msg_dict['message'] = m.text
+                if is_test:
+                    msg_dict['is_test'] = True
+            body_str = json.dumps(msg_dict)
+            self.channel.basic_publish(exchange=self.exchange_name,
+                                    routing_key=self.routing_key,
+                                    properties=pika.BasicProperties(
+                                            reply_to=self.callback_queue_name,
+                                            correlation_id=str(message_id)
+                                            ),
+                                    body=body_str)
+            self.log_info('publish message [{0}]. sended data: {1}', message_id, body_str)
+        except Exception as e:
+            raise MessageRpcClientError(str(e), e)
 
 
 if __name__ != '__main__':

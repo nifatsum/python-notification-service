@@ -1,4 +1,4 @@
-from src.api import fields, auth, Resource, reqparse, marshal, abort, orm, rpc_client
+from src.api import fields, auth, Resource, reqparse, marshal, abort, orm, rpc_client, MessageRpcClientError
 
 notification_fields = {
     'notification_id': fields.String,
@@ -60,6 +60,8 @@ class NotificationListAPI(Resource):
 
                 res = i.to_dict(with_collections=True)
                 return {'notification': marshal(res, notification_fields)}, 201
+        except MessageRpcClientError as ex:
+            abort(500, {'message': ex.message})
         except orm.EntityCreationError as e:
             abort(500, {'message': e.message})
         except orm.ObjectNotFound as e:
