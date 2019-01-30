@@ -17,8 +17,8 @@ class UserListAPI(Resource):
 
     def __init__(self):
         self.reqparse = reqparse.RequestParser()
-        self.reqparse.add_argument('name', type=str, required=True, location='json',
-                                   help='No user name provided')
+        self.reqparse.add_argument('name', type=str, required=True, location='json')
+        self.reqparse.add_argument('password', type=str, required=True, location='json')
         self.reqparse.add_argument('email', type=str, default=None, location='json')
         self.reqparse.add_argument('phone', type=str, default=None, location='json')
         super().__init__()
@@ -35,6 +35,7 @@ class UserListAPI(Resource):
             n = args["name"]
             e = args["email"]
             p = args["phone"]
+            
             print(n, e, p)
             c = orm.UserEntity.select(lambda u: u.name == n 
                                         or u.email == e 
@@ -42,7 +43,9 @@ class UserListAPI(Resource):
                                 ).count()
             if c > 0:
                 abort(409) # TODO: заменить на abort_already_exists()
-            i = orm.UserEntity(name=n, email=e, phone=p)
+
+            pwd = args['password']
+            i = orm.UserEntity(name=n, email=e, phone=p, password_hash=pwd)
             return {'user': marshal(i.to_dict(with_collections=True), user_fields)}, 201
             # return marshal(u.to_dict(with_collections=True), user_fields), 201
 

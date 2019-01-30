@@ -5,9 +5,10 @@ import json
 from pony.orm import (db_session, Database, PrimaryKey, 
                         Required, Optional, OrmError, 
                         Set, ObjectNotFound, composite_key)
-
+# from passlib.apps import custom_app_context as pwd_context
+from passlib.context import CryptContext # as pwd_context
 db = Database()
-
+pwd_context = CryptContext(schemes=["pbkdf2_sha256", "des_crypt"])
 
 def use_default_binding_settings():
     db.bind(provider="sqlite", filename="./assets/notifications.sqlite", create_db=True)
@@ -23,7 +24,17 @@ class DbInitor: # TODO: придумать нормальное название
         if not def_channel:
             # юзаем фиксированный uuid для default канала
             ch_id = uuid.UUID('c64f941d-de0c-484d-8451-98747bbcc831')
-            def_channel = ChannelEntity(channel_id=ch_id, name='default', description='default channel')
+            def_channel = ChannelEntity(channel_id=ch_id, 
+                                        name='default', 
+                                        description='default channel')
+
+        u_name = 'admin'
+        admin = UserEntity.get(name=u_name)
+        if not admin:
+            admin_pass_hash = 'MTIzNDU2Nzg5MA==' # equal 1234567890
+            admin = UserEntity(name=u_name, 
+                            email='phagzkyrrw@mail.ru', 
+                            password_hash=admin_pass_hash)
 
         test_email_list = ['v1jprivzlrno@yandex.ru', 'v1jprivzlrno@mail.ru']
         if not UserEntity.exists():
@@ -34,7 +45,8 @@ class DbInitor: # TODO: придумать нормальное название
                     continue
                 e = test_email_list[i]
                 p = None # '7922{0}'.format(str(i)*7)
-                UserEntity(name=u_name, email=e, phone=p)
+                pass_hash = 'MTIzNDU2Nzg=' # equal = '12345678'
+                UserEntity(name=u_name, email=e, phone=p, password_hash=pass_hash)
 
 class EntityCreationError(OrmError):
     def __init__(self, message, inner=None, *args, **kwargs):
@@ -159,7 +171,7 @@ class UserEntity(db.Entity):
     _table_ = "User"
     # TODO: set user_id as bigint
     user_id = PrimaryKey(uuid.UUID, column="UserId", default=uuid.uuid4) 
-    password_hash = Optional(str, column="PasswordHash", nullable=True, max_len=64)
+    password_hash = Required(str, column="PasswordHash", max_len=255)
     name = Required(str, column="Name", unique=True, max_len=64)
     email = Optional(str, column="Email", nullable=True, max_len=64)
     phone = Optional(str, column="Phone", nullable=True, max_len=32)
@@ -167,10 +179,15 @@ class UserEntity(db.Entity):
     update_date = Required(dt.datetime, column="UpdateDate", default=dt.datetime.utcnow())
     addresses = Set(lambda: AddressEntity)
 
+    def verify_password(self, password):
+        return pwd_context.verify(password, self.password_hash)
+
     def before_insert(self):
         if len(self.email or '') == 0 and len(self.phone or '') == 0:
             m = '({0})you must specify an "email" or "phone"'
             raise EntityCreationError(m.format(self.__class__.__name__))
+        pass_hash = pwd_context.hash(secret='{0}{1}'.format(self.password_hash, self.user_id))
+        self.password_hash = pass_hash
 
     def after_insert(self):
         """создаем адреса и добавляем их в default канал"""

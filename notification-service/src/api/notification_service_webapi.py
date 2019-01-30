@@ -12,16 +12,25 @@ orm.DbInitor.seed()
 app = Flask(__name__, static_url_path="")
 api = Api(app)
 
-@auth.get_password
-def get_password(username):
-    if username == 'admin':
-        return '12345678'
-    return None
+# @auth.get_password
+# def get_password(username):
+#     if username == 'admin':
+#         return '12345678'
+#     return None
 
-# @auth.verify_password
-# def verify_password(u, p):
-#     print('verify_password: [{0}], [{1}]'.format(u, p))
-#     return True
+@auth.verify_password
+def verify_password(u, p):
+    if not u or not p:
+        return False
+    # print('verify_password: [{0}], [{1}]'.format(u, p))
+    # return False
+    with orm.db_session:
+        u = orm.UserEntity.get(name=u)
+        pass_with_salt = '{0}{1}'.format(p, u.user_id if u else None)
+        # print('pass_with_salt:', pass_with_salt)
+        if not u or not u.verify_password(pass_with_salt):
+            return False
+    return True
 
 @auth.error_handler
 def unauthorized():
@@ -48,5 +57,5 @@ api.add_resource(IndexApi, '/api/v1.0/', endpoint='index')
 
 # TODO: в сущностях где есть адреса - выводить адреса подробно, а не только address_id (проблема с цикличностью)
 
-if __name__ == '__main__':
-    app.run(debug=True)
+# if __name__ == '__main__':
+#     app.run(debug=True)
