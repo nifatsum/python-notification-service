@@ -1,5 +1,6 @@
 import pika, uuid, time, json, threading
 from datetime import datetime, timedelta
+import os
 #from src.entities import MesaageEntity, NotificationEntity, db_session, use_default_binding_settings
 
 def is_valid_uuid(uuid_to_test, version=4):
@@ -36,6 +37,8 @@ def isoformat_to_datetime(dt_str):
     res = dt + timedelta(microseconds=us)
     return res
 
+host = os.environ.get('RABBIT_HOST', 'localhost')
+
 default_rabbit_config = { 
     # 'credentials': { 'username':'dev', 'password':'dev' },
     'queue': { 'queue': 'notification_message_rpc', 'durable': True },
@@ -45,7 +48,7 @@ default_rabbit_config = {
     'routing_key': 'message',
     'callback_queue': { 'queue': 'message_rpc_callback', 'durable': True, 'exclusive': False },
     # 'port': 5672,
-    'host': 'localhost',
+    'host': host,
     'no_ack': False
     }
 
