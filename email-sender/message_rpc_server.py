@@ -1,6 +1,7 @@
 import pika, json
 from datetime import datetime
 from email_sender import EmailSender
+import os
 
 # TODO: заменить на "namedtuple"
 class DTOMessage(object):
@@ -23,9 +24,10 @@ class DTOMessage(object):
                     dct['message'],
                     is_test=dct.get('is_test', False))
 
+host = os.environ.get('RABBIT_HOST', 'localhost')
 
 default_rabbit_config = { 
-    'host': 'localhost', 
+    'host': host, 
     # 'port': 5672,
     # 'username':'dev', 'password':'dev',
     'queue': 'notification_message_rpc',
