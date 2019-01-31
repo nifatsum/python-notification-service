@@ -70,6 +70,8 @@ class MessageRpcClient(object):
     def __init__(self, auto_start=False, rabbit_config=None):
         self.config = rabbit_config or default_rabbit_config.copy()
 
+        self.log_info(json.dumps(self.config, indent=4))
+
         self.routing_key = self.config.pop('routing_key') # required
         self.callback_queue_params = self.config.pop('callback_queue') # required
 
