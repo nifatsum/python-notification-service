@@ -206,11 +206,11 @@ class UserEntity(db.Entity):
         return i
 
     def update_email(self, new_email):
-        # TODO: *
+        # TODO: обновить сущность Address
         raise EntityCreationError("not implemented")
 
     def update_phone(self, new_phone):
-        # TODO: *
+        # TODO: обновить сущность Address
         raise EntityCreationError("not implemented")
 
 #----------------------------------------------------------
