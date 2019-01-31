@@ -1,0 +1,1 @@
+docker run -d --name=message-sender message-rpc-sender
