@@ -198,7 +198,7 @@ class RpcWorker:
             # и сюда надо пробрасывать делегат
             is_ok = False
             with db_session:
-                m = MesaageEntity.get(message_id)
+                m = MesaageEntity.get(message_id=message_id)
                 if m:
                     if m.state_id != 'Sent':
                         u_date = isoformat_to_datetime(date)
