@@ -142,7 +142,7 @@ class MessageConsumerRPC:
 if __name__ == '__main__':
     import sys
     c = MessageConsumerRPC()
-    c.start()
+    c._start()
 
     # stop_words = ['q', 'exit', 'c', 'quit', 'cancel', 'abort']
     # print('statrt check user input...')
