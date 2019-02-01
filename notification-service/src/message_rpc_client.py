@@ -2,6 +2,7 @@ import pika, uuid, time, json, threading
 from datetime import datetime, timedelta
 import os
 from src.entities import MesaageEntity, NotificationEntity, db_session, use_default_binding_settings
+from src.logger import LoggerProxy
 
 def isoformat_to_datetime(dt_str):
     dt, _, us= dt_str.partition(".")
@@ -43,15 +44,17 @@ class MessageRpcClient(object):
     def __init__(self, rabbit_config=None, max_retry_c=None):
         self.max_retry_count = max_retry_c if max_retry_c else max_retry_count
         self.config = rabbit_config or default_rabbit_config.copy()
+        self.logger = LoggerProxy(self.__class__.__name__)
         self.log_info(json.dumps(self.config, indent=4))
 
     # TODO: прикрутить во всем проекте нормальный логгер. например loguru
     def log_info(self, message, *args, **kwargs):
-        if len(args) > 0:
-            message = message.format(*args)
-        elif len(kwargs) > 0:
-            message = message.format(**kwargs)
-        print('{0}: {1}'.format(self.__class__.__name__, message))
+        # if len(args) > 0:
+        #     message = message.format(*args)
+        # elif len(kwargs) > 0:
+        #     message = message.format(**kwargs)
+        # print('{0}: {1}'.format(self.__class__.__name__, message))
+        self.logger.info(message, *args, **kwargs)
 
     def process_notification(self, notification_id, 
                         is_test=None, include_faliled=False, all_unsuccess=False):
@@ -110,14 +113,16 @@ class RpcWorker:
         self.queue_name = None
 
         self.response_received = False
+        self.logger = LoggerProxy(self.__class__.__name__)
 
     # TODO: прикрутить во всем проекте нормальный логгер. например loguru
     def log_info(self, message, *args, **kwargs):
-        if len(args) > 0:
-            message = message.format(*args)
-        elif len(kwargs) > 0:
-            message = message.format(**kwargs)
-        print('{0}: {1}'.format(self.__class__.__name__, message))
+        # if len(args) > 0:
+        #     message = message.format(*args)
+        # elif len(kwargs) > 0:
+        #     message = message.format(**kwargs)
+        # print('{0}: {1}'.format(self.__class__.__name__, message))
+        self.logger.info(message, *args, **kwargs)
 
     def _open_connection(self):
         self.connection = None
