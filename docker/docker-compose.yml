@@ -25,8 +25,15 @@ services:
       - RABBIT_HOST=rabbit1
     depends_on:
       - rabbit1
-    # links:
-    #   - rabbit1:broker
+
+  message-sender:
+    image: message-rpc-sender
+    # ports:
+    #   - "5000:5000"
+    environment:
+      - RABBIT_HOST=rabbit1
+    depends_on:
+      - rabbit1
 
   # nginx
   proxy1:
