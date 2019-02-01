@@ -38,7 +38,7 @@ def isoformat_to_datetime(dt_str):
     return res
 
 host = os.environ.get('RABBIT_HOST', 'localhost')
-
+max_retry_count = os.environ.get('MAX_RETRY_COUNT', 10)
 default_rabbit_config = { 
     # 'credentials': { 'username':'dev', 'password':'dev' },
     'queue': { 'queue': 'notification_message_rpc', 'durable': True },
@@ -67,7 +67,8 @@ class CallbackProcessingError(MessageRpcClientError):
                                         str(self.inner))
 
 class MessageRpcClient(object):
-    def __init__(self, auto_start=False, rabbit_config=None):
+    def __init__(self, auto_start=False, rabbit_config=None, max_retry_c=None):
+        self.max_retry_count = max_retry_c if max_retry_c else max_retry_count
         self.config = rabbit_config or default_rabbit_config.copy()
 
         self.log_info(json.dumps(self.config, indent=4))
@@ -119,7 +120,15 @@ class MessageRpcClient(object):
                 raise ValueError('MessageRpcClient - is already started')
 
             try:
-                self.connection = pika.BlockingConnection(pika.ConnectionParameters(**self.config))
+                while not self.connection:
+                    self.max_retry_count -= 1
+                    try:
+                        self.connection = pika.BlockingConnection(pika.ConnectionParameters(**self.config))
+                    except pika.exceptions.AMQPError as e1:
+                        self.log_info('[TRY RECONNECT: max_retry_count:{0}] AMQPError: {1}', self.max_retry_count, str(e1))
+                        time.sleep(1)
+                        if self.max_retry_count <= 0:
+                            raise e1
 
                 self.channel = self.connection.channel()
                 if self.prefetch_count:
