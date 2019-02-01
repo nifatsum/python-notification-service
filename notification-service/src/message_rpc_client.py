@@ -69,7 +69,7 @@ class MessageRpcClient(object):
             with db_session:
                 n = NotificationEntity[notification_id]
                 tmp_list = n.messages.select(lambda m: (all_unsuccess and m.state_id in ['Error', 'Created']) or (include_faliled and m.state_id == 'Error') or m.state_id == 'Created')
-                self.log_info('tmp_list count: {0}', len(tmp_list))
+                # self.log_info('tmp_list count: {0}', len(tmp_list))
                 tmp_id_list = [m.message_id for m in tmp_list]
                 created_messages_ids.extend(tmp_id_list)
 
