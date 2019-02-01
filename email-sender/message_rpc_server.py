@@ -27,6 +27,7 @@ class DTOMessage(object):
 
 host = os.environ.get('RABBIT_HOST', 'localhost')
 max_retry_count = int(os.environ.get('MAX_RETRY_COUNT', '10'))
+default_reconnect_delay = int(os.environ.get('RABBIT_RECONNECT_DELAY', '5'))
 
 default_rabbit_config = { 
     'host': host, 
@@ -38,9 +39,10 @@ default_rabbit_config = {
 
 class MessageConsumerRPC:
     # TODO: переработать методы аналогично message_rpc_client
-    def __init__(self, rabbit_config=None, max_retry_c=None):
+    def __init__(self, rabbit_config=None, max_retry_c=None, reconnect_delay=None):
         self.max_retry_count = max_retry_c if max_retry_c else max_retry_count
         self.config = rabbit_config or default_rabbit_config.copy()
+        self.reconnect_delay = reconnect_delay or default_reconnect_delay
         
         self.durable = self.config.pop('durable', False)
         self.queue_name = self.config.pop('queue', None)
@@ -76,7 +78,7 @@ class MessageConsumerRPC:
                 self.log_info('connect to Rabbit - successful')
             except pika.exceptions.AMQPError as e1:
                 self.log_info('[TRY RECONNECT: max_retry_count:{0}] AMQPError: {1}', self.max_retry_count, str(e1))
-                time.sleep(2)
+                time.sleep(self.reconnect_delay)
                 if self.max_retry_count <= 0:
                     raise e1
 
