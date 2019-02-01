@@ -25,7 +25,7 @@ class DTOMessage(object):
                     is_test=dct.get('is_test', False))
 
 host = os.environ.get('RABBIT_HOST', 'localhost')
-max_retry_count = os.environ.get('MAX_RETRY_COUNT', 10)
+max_retry_count = int(os.environ.get('MAX_RETRY_COUNT', '10'))
 
 default_rabbit_config = { 
     'host': host, 
