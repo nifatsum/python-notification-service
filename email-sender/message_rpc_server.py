@@ -1,4 +1,4 @@
-import pika, json, time
+import pika, json, time, threading
 from datetime import datetime
 from email_sender import EmailSender
 import os
@@ -140,32 +140,32 @@ class MessageConsumerRPC:
 
 
 if __name__ == '__main__':
-    import sys, threading
+    import sys
     c = MessageConsumerRPC()
     c.start()
 
-    stop_words = ['q', 'exit', 'c', 'quit', 'cancel', 'abort']
-    print('statrt check user input...')
-    print('stop_words: {0}'.format(stop_words))
+    # stop_words = ['q', 'exit', 'c', 'quit', 'cancel', 'abort']
+    # print('statrt check user input...')
+    # print('stop_words: {0}'.format(stop_words))
 
-    def dispose_and_exit(exit_code=0):
-        c.stop()
-        sys.exit(exit_code)
+    # def dispose_and_exit(exit_code=0):
+    #     c.stop()
+    #     sys.exit(exit_code)
 
-    while True:
-        try:
-            print('enter command:')
-            user_input = input()
+    # while True:
+    #     try:
+    #         print('enter command:')
+    #         user_input = input()
 
-            if user_input in ['--help', 'help', '-h']:
-                print('stop_words: {0}'.format(stop_words))
-            elif user_input in stop_words:
-                print('stop word catched !')
-                dispose_and_exit(1)
-            else:
-                print('user_input:', user_input)
-        except ValueError as ex:
-            print('Exception {0}: {1}'.format(type(ex).__name__, ex))
-        except KeyboardInterrupt:
-            print('KeyboardInterrupt')
-            dispose_and_exit(0)
+    #         if user_input in ['--help', 'help', '-h']:
+    #             print('stop_words: {0}'.format(stop_words))
+    #         elif user_input in stop_words:
+    #             print('stop word catched !')
+    #             dispose_and_exit(1)
+    #         else:
+    #             print('user_input:', user_input)
+    #     except ValueError as ex:
+    #         print('Exception {0}: {1}'.format(type(ex).__name__, ex))
+    #     except KeyboardInterrupt:
+    #         print('KeyboardInterrupt')
+    #         dispose_and_exit(0)
