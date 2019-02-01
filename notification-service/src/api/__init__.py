@@ -3,5 +3,5 @@ from flask_restful import Api, Resource, reqparse, fields, marshal
 from flask_httpauth import HTTPBasicAuth
 import src.entities as orm
 from src.message_rpc_client import MessageRpcClient, CallbackProcessingError, MessageRpcClientError
-rpc_client = MessageRpcClient(auto_start=True)
+rpc_client = MessageRpcClient()
 auth = HTTPBasicAuth()

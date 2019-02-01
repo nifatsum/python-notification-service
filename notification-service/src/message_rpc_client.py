@@ -1,34 +1,7 @@
 import pika, uuid, time, json, threading
 from datetime import datetime, timedelta
 import os
-#from src.entities import MesaageEntity, NotificationEntity, db_session, use_default_binding_settings
-
-def is_valid_uuid(uuid_to_test, version=4):
-    """
-    Check if uuid_to_test is a valid UUID.
-
-    Parameters
-    ----------
-    uuid_to_test : str
-    version : {1, 2, 3, 4}
-
-    Returns
-    -------
-    `True` if uuid_to_test is a valid UUID, otherwise `False`.
-
-    Examples
-    --------
-    >>> is_valid_uuid('c9bf9e57-1685-4c89-bafb-ff5af830be8a')
-    True
-    >>> is_valid_uuid('c9bf9e58')
-    False
-    """
-    try:
-        uuid_obj = UUID(uuid_to_test, version=version)
-    except:
-        return False
-
-    return str(uuid_obj) == uuid_to_test
+from src.entities import MesaageEntity, NotificationEntity, db_session, use_default_binding_settings
 
 def isoformat_to_datetime(dt_str):
     dt, _, us= dt_str.partition(".")
@@ -67,11 +40,49 @@ class CallbackProcessingError(MessageRpcClientError):
                                         str(self.inner))
 
 class MessageRpcClient(object):
-    def __init__(self, auto_start=False, rabbit_config=None, max_retry_c=None):
+    def __init__(self, rabbit_config=None, max_retry_c=None):
         self.max_retry_count = max_retry_c if max_retry_c else max_retry_count
         self.config = rabbit_config or default_rabbit_config.copy()
-
         self.log_info(json.dumps(self.config, indent=4))
+
+    # TODO: прикрутить во всем проекте нормальный логгер. например loguru
+    def log_info(self, message, *args, **kwargs):
+        if len(args) > 0:
+            message = message.format(*args)
+        elif len(kwargs) > 0:
+            message = message.format(**kwargs)
+        print('{0}: {1}'.format(self.__class__.__name__, message))
+
+    def process_notification(self, notification_id, 
+                        is_test=None, include_faliled=False, all_unsuccess=False):
+        try:
+            if not isinstance(notification_id, uuid.UUID):
+                raise ValueError('MessageRpcClient - uuid is expected ofr param "notification_id"')
+
+            self.log_info('send messages for notification "{0}". (is_test: {1}, include_faliled: {2}, all_unsuccess: {3})', 
+                        notification_id, is_test, include_faliled, all_unsuccess)
+
+            created_messages_ids = []
+            with db_session:
+                n = NotificationEntity[notification_id]
+                tmp_list = n.messages.select(lambda m: (all_unsuccess and m.state_id in ['Error', 'Created']) or (include_faliled and m.state_id == 'Error') or m.state_id == 'Created')
+                self.log_info('tmp_list count: {0}', len(tmp_list))
+                tmp_id_list = [m.message_id for m in tmp_list]
+                created_messages_ids.extend(tmp_id_list)
+
+            if created_messages_ids and len(created_messages_ids) > 0:
+                for m_id in created_messages_ids:
+                    th = threading.Thread(target=RpcWorker(self.config, self.max_retry_count).send_message, args=[m_id, is_test])  # <- 1 element list
+                    th.start()
+            self.log_info('{0} msgs was sended.', len(created_messages_ids))
+        except Exception as e:
+            raise MessageRpcClientError('process_notification({0}) error:\n{1}'.format(notification_id, str(e)), e)
+
+# TODO: возможно стоит переделать на класс вида "class CustomThread(threading.Thread)"
+class RpcWorker:
+    def __init__(self, rabbit_config, max_retry_c):
+        self.max_retry_count = max_retry_c #if max_retry_c else max_retry_count
+        self.config = rabbit_config #or default_rabbit_config.copy()
 
         self.routing_key = self.config.pop('routing_key') # required
         self.callback_queue_params = self.config.pop('callback_queue') # required
@@ -89,17 +100,16 @@ class MessageRpcClient(object):
 
         self.connection = None
         self.channel = None
-        
+
         self.callback_queue = None
         self.callback_queue_name = None
 
+        self.exchange = None
+        # self.exchange_name = None
         self.queue = None
         self.queue_name = None
-        self.exchange = None
-        self.exchange_name = None
 
-        if auto_start:
-            self.start()
+        self.response_received = False
 
     # TODO: прикрутить во всем проекте нормальный логгер. например loguru
     def log_info(self, message, *args, **kwargs):
@@ -109,71 +119,66 @@ class MessageRpcClient(object):
             message = message.format(**kwargs)
         print('{0}: {1}'.format(self.__class__.__name__, message))
 
-    def start(self):
-        t = threading.Thread(target=self._start)
-        t.start()
-        # self._start()
-
-    def _start(self):
-        try:
-            if self.channel:
-                raise ValueError('MessageRpcClient - is already started')
-
+    def _open_connection(self):
+        self.connection = None
+        _max_retry_count = self.max_retry_count
+        while not (self.connection and self.connection.is_open):
+            _max_retry_count -= 1
             try:
-                while not self.connection:
-                    self.max_retry_count -= 1
-                    try:
-                        self.connection = pika.BlockingConnection(pika.ConnectionParameters(**self.config))
-                    except pika.exceptions.AMQPError as e1:
-                        self.log_info('[TRY RECONNECT: max_retry_count:{0}] AMQPError: {1}', self.max_retry_count, str(e1))
-                        time.sleep(1)
-                        if self.max_retry_count <= 0:
-                            raise e1
-
-                self.log_info('connect ot Rabbit - successful')
-                self.channel = self.connection.channel()
-                if self.prefetch_count:
-                    self.channel.basic_qos(prefetch_count=self.prefetch_count)
-
-                self.callback_queue = self.channel.queue_declare(**self.callback_queue_params)
-                self.callback_queue_name = self.callback_queue.method.queue
-
-                if self.queue_params:
-                    self.queue = self.channel.queue_declare(**self.queue_params)
-                    self.queue_name = self.queue.method.queue
-                if self.exchange_params:
-                    self.exchange = self.channel.exchange_declare(**self.exchange_params)
-                    self.exchange_name = self.exchange_params['exchange']
-                    self.exchange_type = self.exchange_params['exchange_type']
-
-                # (опциоанльно) биндим основную очередь и обменник, если их параметры указаны
-                if self.queue and self.exchange:
-                    r_key = self.routing_key if self.exchange_type != 'fanout' else ''
-                    self.channel.queue_bind(queue=self.queue_name, 
-                                            exchange=self.exchange_name,
-                                            routing_key=r_key)
-
-                self.channel.basic_consume(consumer_callback=self.on_response, 
-                                            no_ack=self.no_ack,
-                                            queue=self.callback_queue_name)
-            except pika.exceptions.AMQPError as ex:
-                self.log_info('AMQPError: {0}', str(ex))
+                self.connection = pika.BlockingConnection(pika.ConnectionParameters(**self.config))
+                self.log_info('connect to Rabbit - successful')
+            except pika.exceptions.AMQPError as e1:
+                self.log_info('[TRY RECONNECT: max_retry_count:{0}] AMQPError: {1}', self.max_retry_count, str(e1))
+                time.sleep(1)
                 self.connection = None
-                raise ex
+                if self.max_retry_count <= 0:
+                    raise e1
 
-            if self.connection:
-                self.log_info('start callback consuming...')
-                while self.connection and self.connection.is_open:
-                    try:
-                        self.connection.process_data_events(time_limit=None)
-                        #self.log_info('connection.process_data_events(time_limit=None) !!!!!   !!!!!!   !!!!!!')
-                    except CallbackProcessingError as cpe:
-                        self.log_info('CallbackProcessingError CONTINUE TO WORK !!! !!! !!!\n {0}', str(cpe))
-                        #raise cpe
-        except Exception as ex:
-            self.log_info('_start() FATAL ERORR !!! !!! !!!  {0}', str(ex))
-            self.stop()
-            raise ex
+    def _check_connection_is_open(self, rabbit_connection: pika.BlockingConnection):
+        if not rabbit_connection or not rabbit_connection.is_open:
+            raise MessageRpcClientError('connection is closed.')
+
+    def _check_channel_is_open(self, rabbit_channel):
+        if not rabbit_channel or not rabbit_channel.is_open:
+            raise MessageRpcClientError('channel is closed.')
+
+    def _open_channel(self):
+        self._check_connection_is_open(self.connection)
+        self.channel = self.connection.channel()
+        if self.prefetch_count:
+            self.channel.basic_qos(prefetch_count=self.prefetch_count)
+
+    def _declare_callback_queue(self):
+        self._check_channel_is_open(self.channel)
+        self.callback_queue = self.channel.queue_declare(**self.callback_queue_params)
+        self.callback_queue_name = self.callback_queue.method.queue
+
+    def _main_queue_bind(self):
+        self._check_channel_is_open(self.channel)
+        if self.queue_params:
+            self.queue = self.channel.queue_declare(**self.queue_params)
+            self.queue_name = self.queue.method.queue
+        if self.exchange_params:
+            self.exchange = self.channel.exchange_declare(**self.exchange_params)
+            self.exchange_name = self.exchange_params['exchange']
+            self.exchange_type = self.exchange_params['exchange_type']
+
+        # (опциоанльно) биндим основную очередь и обменник, если их параметры указаны
+        if self.queue and self.exchange:
+            r_key = self.routing_key if self.exchange_type != 'fanout' else ''
+            self.channel.queue_bind(queue=self.queue_name, 
+                                    exchange=self.exchange_name,
+                                    routing_key=r_key)
+
+    def _stop(self):
+        if self.channel:
+            self.channel.stop_consuming()
+            self.channel = None
+
+        if self.connection:
+            self.connection.close()
+            self.connection = None
+        self.log_info('was stopped')
 
     def on_response(self, ch, method, props, body):
         try:
@@ -190,67 +195,40 @@ class MessageRpcClient(object):
             with db_session:
                 m = MesaageEntity.get(message_id)
                 if m:
-                    u_date = isoformat_to_datetime(date)
-                    if error:
-                        m.to_error_state(error_message=error, update_date=u_date)
-                    else:
-                        m.to_accepted_state(update_date=u_date)
+                    if m.state_id != 'Sent':
+                        u_date = isoformat_to_datetime(date)
+                        if error:
+                            m.to_error_state(error_message=error, update_date=u_date)
+                        else:
+                            m.to_accepted_state(update_date=u_date)
                     is_ok = True
                 else:
                     self.log_info('message "{0}" not found', message_id)
+                    self.channel.basic_nack(delivery_tag=method.delivery_tag)
 
-            if is_ok and not self.no_ack:
-                self.channel.basic_ack(delivery_tag=method.delivery_tag)
+            if is_ok:
+                if not self.no_ack:
+                    self.channel.basic_ack(delivery_tag=method.delivery_tag)
+                self.response_received = True
         except Exception as ex:
-            self.channel.basic_nack(delivery_tag=method.delivery_tag)
+            if self.channel and self.channel.is_open:
+                self.channel.basic_nack(delivery_tag=method.delivery_tag)
             raise CallbackProcessingError(ex)
-
-    def stop(self):
-        if self.channel:
-            self.channel.stop_consuming()
-            self.channel = None
-
-        if self.connection:
-            self.connection.close()
-            self.connection = None
-        self.log_info('was stopped')
-
-    def process_notification(self, notification_id, 
-                        is_test=None, 
-                        include_faliled=False, 
-                        all_unsuccess=False):
-        try:
-            if not self.channel:
-                raise ValueError('MessageRpcClient - is not started')
-
-            if not isinstance(notification_id, uuid.UUID):
-                raise ValueError('MessageRpcClient - uuid is expected ofr param "notification_id"')
-
-            self.log_info('send messages for notification "{0}". (is_test: {1}, include_faliled: {2}, all_unsuccess: {3})', 
-                        notification_id, is_test, include_faliled, all_unsuccess)
-
-            created_messages_ids = []
-            with db_session:
-                n = NotificationEntity[notification_id]
-                tmp_list = n.messages.select(lambda m: (all_unsuccess and m.state_id in ['Error', 'Created']) or (include_faliled and m.state_id == 'Error') or m.state_id == 'Created')
-                self.log_info('tmp_list count: {0}', len(tmp_list))
-                created_messages_ids.extend([m.message_id for m in tmp_list])
-
-            if created_messages_ids and len(created_messages_ids) > 0:
-                for m_id in created_messages_ids:
-                    self.send_message(message_id=m_id, is_test=is_test)
-            self.log_info('{0} msgs was sended.', len(created_messages_ids))
-        except Exception as e:
-            raise MessageRpcClientError('process_notification({0}) error:\n{1}'.format(notification_id, str(e)), e)
 
     def send_message(self, message_id, is_test=None):
         try:
-            if not self.channel:
-                raise ValueError('MessageRpcClient - is not started')
-
             if isinstance(message_id, str):
                 message_id = uuid.UUID(message_id)
                 self.log_info('send({0}) - parse "str" to uuid', message_id)
+
+            self._open_connection()
+            self._open_channel()
+            self._declare_callback_queue()
+            self._main_queue_bind()
+
+            self.channel.basic_consume(consumer_callback=self.on_response, 
+                                    no_ack=self.no_ack,
+                                    queue=self.callback_queue_name)
 
             msg_dict = {}
             with db_session:
@@ -277,63 +255,17 @@ class MessageRpcClient(object):
                                             ),
                                     body=body_str)
             self.log_info('publish message [{0}]. sended data: {1}', message_id, body_str)
+
+            while not self.response_received:
+                self.log_info('process_data_events...')
+                self.connection.process_data_events(time_limit=None)
+
+        except MessageRpcClientError as rpc_err:
+            raise rpc_err
         except Exception as e:
             raise MessageRpcClientError('send_message({0}) error:\n{1}'.format(message_id, str(e)), e)
-
-
-if __name__ != '__main__':
-    from src.entities import MesaageEntity, NotificationEntity, db_session, use_default_binding_settings
-else:
-    from entities import MesaageEntity, NotificationEntity, db_session, use_default_binding_settings
-    import sys
-    use_default_binding_settings()
-    c = MessageRpcClient()
-    c.start()
-    time.sleep(0.1)
-
-    stop_words = ['q', 'exit', 'c', 'quit', 'cancel', 'abort']
-    print('statrt check user input...')
-    print('stop_words: {0}'.format(stop_words))
-
-    def dispose_and_exit(exit_code=0):
-        c.stop()
-        sys.exit(exit_code)
-
-    proc_notif_param = "-n "
-    while True:
-        try:
-            print('enter message_id:')
-            user_input = input()
-            # print('user_input: ', user_input)
-            if user_input in ['--help', 'help', '-h']:
-                print('stop_words: {0}'.format(stop_words))
-            elif user_input in stop_words:
-                print('stop word catched !')
-                dispose_and_exit(1)
-            elif user_input.startswith(proc_notif_param):
-                user_input = user_input.replace(proc_notif_param, '').strip()
-
-                all_unsuccess = False
-                all_unsuccess_param = '--all'
-                if all_unsuccess_param in user_input:
-                    user_input = user_input.replace(all_unsuccess_param, '').strip()
-                    all_unsuccess = True
-
-                include_faliled = False
-                include_faliled_param = '--failed'
-                if include_faliled_param in user_input:
-                    user_input = user_input.replace(include_faliled_param, '').strip()
-                    include_faliled = True
-
-                notification_id = uuid.UUID(user_input)
-                c.process_notification(notification_id=notification_id,
-                                    is_test=True, 
-                                    include_faliled=include_faliled,
-                                    all_unsuccess=all_unsuccess)
-            else:
-                c.send_message(message_id=user_input, is_test=True)
-        except Exception as ex:
-            print('@@ Exception {0}: {1}'.format(type(ex).__name__, ex))
-        except KeyboardInterrupt:
-            print('@@ KeyboardInterrupt')
-            dispose_and_exit(0)
+        finally:
+            try:
+                self._stop()
+            except:
+                pass
