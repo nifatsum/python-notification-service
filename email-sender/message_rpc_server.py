@@ -1,6 +1,7 @@
 import pika, json, time, threading
 from datetime import datetime
 from email_sender import EmailSender
+from logger import LoggerProxy
 import os
 
 # TODO: заменить на "namedtuple"
@@ -16,7 +17,7 @@ class DTOMessage(object):
 
     @staticmethod
     def from_dict(dct):
-        print('dct:', dct)
+        # print('dct:', dct)
         return DTOMessage(
                     dct['recipient_type'], 
                     dct['recipients'], 
@@ -57,13 +58,11 @@ class MessageConsumerRPC:
         self.channel = None
         self.queue = None
         self.email_sender = EmailSender()
+        self.__logger = LoggerProxy('{0}_{1}'.format(self.__class__.__name__, 
+                                                    datetime.strftime(datetime.utcnow(), '%Y%m%dT%H00')))
 
     def log_info(self, message, *args, **kwargs):
-        if len(args) > 0:
-            message = message.format(*args)
-        elif len(kwargs) > 0:
-            message = message.format(**kwargs)
-        print('{0}: {1}'.format(self.__class__.__name__, message))
+        self.__logger.info(message, *args, **kwargs)
 
     def start(self):
         t = threading.Thread(target=self._start)
@@ -74,26 +73,25 @@ class MessageConsumerRPC:
             self.max_retry_count -= 1
             try:
                 self.connection = pika.BlockingConnection(pika.ConnectionParameters(**self.config))
+                self.log_info('connect to Rabbit - successful')
             except pika.exceptions.AMQPError as e1:
                 self.log_info('[TRY RECONNECT: max_retry_count:{0}] AMQPError: {1}', self.max_retry_count, str(e1))
                 time.sleep(2)
                 if self.max_retry_count <= 0:
                     raise e1
 
-        self.log_info('connect ot Rabbit - successful')
-
         self.channel = self.connection.channel()
         self.queue = self.channel.queue_declare(queue=self.queue_name, durable=self.durable)
         self.channel.basic_qos(prefetch_count=1)
 
         def on_request(ch, method, props, body):
-            self.log_info('on_request body: {0}', body)
+            self.log_info('"{0}" - on_request body: {1}', props.correlation_id, body)
             dto = json.loads(body, object_hook=DTOMessage.from_dict)
             resp = { 'success': True }
             try:
                 if dto.recipient_type == 'email':
                     if dto.is_test:
-                        self.log_info('dto.is_test: {0}', dto.is_test)
+                        self.log_info('"{0}" - dto.is_test: {1}', props.correlation_id, dto.is_test)
                     else:
                         self.email_sender.send(recipients=dto.recipients, 
                                             subject=dto.subject, 
@@ -110,7 +108,7 @@ class MessageConsumerRPC:
                             properties=pika.BasicProperties(correlation_id=props.correlation_id),
                             body=callback_body)
             ch.basic_ack(delivery_tag=method.delivery_tag)
-            self.log_info('process message "{0}". sended callback data: {1}', props.correlation_id, callback_body)
+            self.log_info('{0} - sended callback: {1}', props.correlation_id, callback_body)
         
         self.channel.basic_consume(on_request, queue=self.queue_name)
 
