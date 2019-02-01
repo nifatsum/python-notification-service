@@ -45,16 +45,6 @@ class MessageRpcClient(object):
         self.max_retry_count = max_retry_c if max_retry_c else max_retry_count
         self.config = rabbit_config or default_rabbit_config.copy()
         self.logger = LoggerProxy(self.__class__.__name__)
-        self.log_info(json.dumps(self.config, indent=4))
-
-    # TODO: прикрутить во всем проекте нормальный логгер. например loguru
-    def log_info(self, message, *args, **kwargs):
-        # if len(args) > 0:
-        #     message = message.format(*args)
-        # elif len(kwargs) > 0:
-        #     message = message.format(**kwargs)
-        # print('{0}: {1}'.format(self.__class__.__name__, message))
-        self.logger.info(message, *args, **kwargs)
 
     def process_notification(self, notification_id, 
                         is_test=None, include_faliled=False, all_unsuccess=False):
@@ -62,28 +52,28 @@ class MessageRpcClient(object):
             if not isinstance(notification_id, uuid.UUID):
                 raise ValueError('MessageRpcClient - uuid is expected ofr param "notification_id"')
 
-            self.log_info('send messages for notification "{0}". (is_test: {1}, include_faliled: {2}, all_unsuccess: {3})', 
+            self.logger.info('send messages for notification "{0}". (is_test: {1}, include_faliled: {2}, all_unsuccess: {3})', 
                         notification_id, is_test, include_faliled, all_unsuccess)
 
             created_messages_ids = []
             with db_session:
                 n = NotificationEntity[notification_id]
                 tmp_list = n.messages.select(lambda m: (all_unsuccess and m.state_id in ['Error', 'Created']) or (include_faliled and m.state_id == 'Error') or m.state_id == 'Created')
-                # self.log_info('tmp_list count: {0}', len(tmp_list))
                 tmp_id_list = [m.message_id for m in tmp_list]
                 created_messages_ids.extend(tmp_id_list)
 
             if created_messages_ids and len(created_messages_ids) > 0:
                 for m_id in created_messages_ids:
-                    th = threading.Thread(target=RpcWorker(self.config.copy(), self.max_retry_count).send_message, args=[m_id, is_test])  # <- 1 element list
+                    th = threading.Thread(target=RpcWorker(self.config.copy(), self.max_retry_count, log_name_postfix=str(m_id)).send_message, args=[m_id, is_test])  # <- 1 element list
                     th.start()
-            self.log_info('{0} msgs was sended.', len(created_messages_ids))
+
+            self.logger.info('{0} msgs was sended.', len(created_messages_ids))
         except Exception as e:
             raise MessageRpcClientError('process_notification({0}) error:\n{1}'.format(notification_id, str(e)), e)
 
 # TODO: возможно стоит переделать на класс вида "class CustomThread(threading.Thread)"
 class RpcWorker:
-    def __init__(self, rabbit_config, max_retry_c):
+    def __init__(self, rabbit_config, max_retry_c, log_name_postfix=None):
         self.max_retry_count = max_retry_c #if max_retry_c else max_retry_count
         self.config = rabbit_config #or default_rabbit_config.copy()
 
@@ -113,15 +103,9 @@ class RpcWorker:
         self.queue_name = None
 
         self.response_received = False
-        self.logger = LoggerProxy(self.__class__.__name__)
+        self.logger = LoggerProxy('{0}_{1}'.format(self.__class__.__name__, log_name_postfix or ''))
 
-    # TODO: прикрутить во всем проекте нормальный логгер. например loguru
     def log_info(self, message, *args, **kwargs):
-        # if len(args) > 0:
-        #     message = message.format(*args)
-        # elif len(kwargs) > 0:
-        #     message = message.format(**kwargs)
-        # print('{0}: {1}'.format(self.__class__.__name__, message))
         self.logger.info(message, *args, **kwargs)
 
     def _open_connection(self):
@@ -259,11 +243,11 @@ class RpcWorker:
                                             correlation_id=str(message_id)
                                             ),
                                     body=body_str)
-            self.log_info('publish message [{0}]. sended data: {1}', message_id, body_str)
+            self.log_info('publish [{0}]. sended data: {1}', message_id, body_str)
 
             _cc = 0
             while not self.response_received:
-                self.log_info('process_data_events...')
+                self.log_info('wait callback...{0}', str(_cc) if _cc > 0 else '')
                 _cc += 1
                 if _cc > 1:
                     time.sleep(0.05)
