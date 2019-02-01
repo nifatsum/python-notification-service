@@ -64,7 +64,7 @@ class MessageRpcClient(object):
 
             if created_messages_ids and len(created_messages_ids) > 0:
                 for m_id in created_messages_ids:
-                    th = threading.Thread(target=RpcWorker(self.config.copy(), self.max_retry_count, log_name_postfix=str(m_id)).send_message, args=[m_id, is_test])  # <- 1 element list
+                    th = threading.Thread(target=RpcWorker(self.config.copy(), self.max_retry_count).send_message, args=[m_id, is_test])  # <- 1 element list
                     th.start()
 
             self.logger.info('{0} msgs was sended.', len(created_messages_ids))
@@ -73,9 +73,9 @@ class MessageRpcClient(object):
 
 # TODO: возможно стоит переделать на класс вида "class CustomThread(threading.Thread)"
 class RpcWorker:
-    def __init__(self, rabbit_config, max_retry_c, log_name_postfix=None):
-        self.max_retry_count = max_retry_c #if max_retry_c else max_retry_count
-        self.config = rabbit_config #or default_rabbit_config.copy()
+    def __init__(self, rabbit_config, max_retry_c):
+        self.max_retry_count = max_retry_c
+        self.config = rabbit_config
 
         self.routing_key = self.config.pop('routing_key') # required
         self.callback_queue_params = self.config.pop('callback_queue') # required
@@ -103,10 +103,12 @@ class RpcWorker:
         self.queue_name = None
 
         self.response_received = False
-        self.logger = LoggerProxy('{0}_{1}'.format(self.__class__.__name__, log_name_postfix or ''))
+        self.log_prefix = ''
+        self.logger = LoggerProxy('{0}_{1}'.format(self.__class__.__name__, 
+                                                datetime.strftime(datetime.utcnow(), '%Y%m%dT%H00')))
 
     def log_info(self, message, *args, **kwargs):
-        self.logger.info(message, *args, **kwargs)
+        self.logger.info('{0}{1}'.format(self.log_prefix, message), *args, **kwargs)
 
     def _open_connection(self):
         self.connection = None
@@ -167,7 +169,7 @@ class RpcWorker:
         if self.connection:
             self.connection.close()
             self.connection = None
-        self.log_info('was stopped')
+        self.log_info('was stopped.')
 
     def on_response(self, ch, method, props, body):
         try:
@@ -206,9 +208,10 @@ class RpcWorker:
 
     def send_message(self, message_id, is_test=None):
         try:
+            self.log_prefix = '{0} - '.format(message_id)
             if isinstance(message_id, str):
                 message_id = uuid.UUID(message_id)
-                self.log_info('send({0}) - parse "str" to uuid', message_id)
+                self.log_info('parse "message_id" from str to uuid', message_id)
 
             self._open_connection()
             self._open_channel()
@@ -243,7 +246,7 @@ class RpcWorker:
                                             correlation_id=str(message_id)
                                             ),
                                     body=body_str)
-            self.log_info('publish [{0}]. sended data: {1}', message_id, body_str)
+            self.log_info('publish. sended data: {1}', message_id, body_str)
 
             _cc = 0
             while not self.response_received:
