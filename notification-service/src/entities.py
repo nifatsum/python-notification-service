@@ -11,7 +11,7 @@ db = Database()
 pwd_context = CryptContext(schemes=["pbkdf2_sha256", "des_crypt"])
 
 def use_default_binding_settings():
-    db.bind(provider="sqlite", filename="../assets/notifications.sqlite", create_db=True)
+    db.bind(provider="sqlite", filename="./../assets/notifications.sqlite", create_db=True)
     db.generate_mapping(create_tables=True)
     DbInitor.seed()
     print('default_binding_settings - is used')
