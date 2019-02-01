@@ -1,4 +1,4 @@
-import pika, json
+import pika, json, time
 from datetime import datetime
 from email_sender import EmailSender
 import os
@@ -25,6 +25,7 @@ class DTOMessage(object):
                     is_test=dct.get('is_test', False))
 
 host = os.environ.get('RABBIT_HOST', 'localhost')
+max_retry_count = os.environ.get('MAX_RETRY_COUNT', 10)
 
 default_rabbit_config = { 
     'host': host, 
@@ -36,7 +37,8 @@ default_rabbit_config = {
 
 class MessageConsumerRPC:
     # TODO: переработать методы аналогично message_rpc_client
-    def __init__(self, rabbit_config=None):
+    def __init__(self, rabbit_config=None, max_retry_c=None):
+        self.max_retry_count = max_retry_c if max_retry_c else max_retry_count
         self.config = rabbit_config or default_rabbit_config.copy()
         
         self.durable = self.config.pop('durable', False)
@@ -68,8 +70,19 @@ class MessageConsumerRPC:
         t.start()
 
     def _start(self):
-        self.connection = pika.BlockingConnection(pika.ConnectionParameters(**self.config))
-        self.channel = self.connection.channel()        
+        while not self.connection:
+            self.max_retry_count -= 1
+            try:
+                self.connection = pika.BlockingConnection(pika.ConnectionParameters(**self.config))
+            except pika.exceptions.AMQPError as e1:
+                self.log_info('[TRY RECONNECT: max_retry_count:{0}] AMQPError: {1}', self.max_retry_count, str(e1))
+                time.sleep(1)
+                if self.max_retry_count <= 0:
+                    raise e1
+
+        self.log_info('connect ot Rabbit - successful')
+
+        self.channel = self.connection.channel()
         self.queue = self.channel.queue_declare(queue=self.queue_name, durable=self.durable)
         self.channel.basic_qos(prefetch_count=1)
 
