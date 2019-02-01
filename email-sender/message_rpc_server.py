@@ -76,7 +76,7 @@ class MessageConsumerRPC:
                 self.connection = pika.BlockingConnection(pika.ConnectionParameters(**self.config))
             except pika.exceptions.AMQPError as e1:
                 self.log_info('[TRY RECONNECT: max_retry_count:{0}] AMQPError: {1}', self.max_retry_count, str(e1))
-                time.sleep(1)
+                time.sleep(2)
                 if self.max_retry_count <= 0:
                     raise e1
 
