@@ -164,11 +164,12 @@ class MessageRpcClient(object):
             if self.connection:
                 self.log_info('start callback consuming...')
                 while self.connection and self.connection.is_open:
-                    self.connection.process_data_events(time_limit=None)
-                    #self.log_info('connection.process_data_events(time_limit=None) !!!!!   !!!!!!   !!!!!!')
-        except CallbackProcessingError as cpe:
-            self.log_info('_start() CONTINUE TO WORK !!! !!! !!! {0}', str(cpe))
-            raise cpe
+                    try:
+                        self.connection.process_data_events(time_limit=None)
+                        #self.log_info('connection.process_data_events(time_limit=None) !!!!!   !!!!!!   !!!!!!')
+                    except CallbackProcessingError as cpe:
+                        self.log_info('CallbackProcessingError CONTINUE TO WORK !!! !!! !!!\n {0}', str(cpe))
+                        #raise cpe
         except Exception as ex:
             self.log_info('_start() FATAL ERORR !!! !!! !!!  {0}', str(ex))
             self.stop()
@@ -185,15 +186,20 @@ class MessageRpcClient(object):
 
             # TODO: по хорошему MessageRpcClient не должен знать о сущностях в БД
             # и сюда надо пробрасывать делегат
+            is_ok = False
             with db_session:
-                m = MesaageEntity[message_id]
-                u_date = isoformat_to_datetime(date)
-                if error:
-                    m.to_error_state(error_message=error, update_date=u_date)
+                m = MesaageEntity.get(message_id)
+                if m:
+                    u_date = isoformat_to_datetime(date)
+                    if error:
+                        m.to_error_state(error_message=error, update_date=u_date)
+                    else:
+                        m.to_accepted_state(update_date=u_date)
+                    is_ok = True
                 else:
-                    m.to_accepted_state(update_date=u_date)
+                    self.log_info('message "{0}" not found', message_id)
 
-            if not self.no_ack:
+            if is_ok and not self.no_ack:
                 self.channel.basic_ack(delivery_tag=method.delivery_tag)
         except Exception as ex:
             raise CallbackProcessingError(ex)
