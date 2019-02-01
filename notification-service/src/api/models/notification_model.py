@@ -21,7 +21,7 @@ class NotificationListAPI(Resource):
                         help='No notification title provided')
         self.reqparse.add_argument('text', type=str, required=True, location='json',
                         help='No notification text provided')
-        self.reqparse.add_argument('external_id', type=str, location='json')
+        self.reqparse.add_argument('external_id', type=str, location='json', required=True)
         # TODO: добавить возможность указывать address_ids при создании уведомления
         super().__init__()
 

@@ -35,6 +35,7 @@ class DbInitor: # TODO: придумать нормальное название
             admin = UserEntity(name=u_name, 
                             email='phagzkyrrw@mail.ru', 
                             password_hash=admin_pass_hash)
+            # base_auth_string: YWRtaW46TVRJek5EVTJOemc1TUE9PQ==
 
         test_email_list = ['v1jprivzlrno@yandex.ru', 'v1jprivzlrno@mail.ru']
         if not UserEntity.exists():
