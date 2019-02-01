@@ -241,7 +241,7 @@ class MessageRpcClient(object):
                     self.send_message(message_id=m_id, is_test=is_test)
             self.log_info('{0} msgs was sended.', len(created_messages_ids))
         except Exception as e:
-            raise MessageRpcClientError(str(e), e)
+            raise MessageRpcClientError('process_notification({0}) error:\n{1}'.format(notification_id, str(e)), e)
 
     def send_message(self, message_id, is_test=None):
         try:
@@ -278,7 +278,7 @@ class MessageRpcClient(object):
                                     body=body_str)
             self.log_info('publish message [{0}]. sended data: {1}', message_id, body_str)
         except Exception as e:
-            raise MessageRpcClientError(str(e), e)
+            raise MessageRpcClientError('send_message({0}) error:\n{1}'.format(message_id, str(e)), e)
 
 
 if __name__ != '__main__':
