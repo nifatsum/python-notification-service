@@ -75,7 +75,7 @@ class MessageRpcClient(object):
 
             if created_messages_ids and len(created_messages_ids) > 0:
                 for m_id in created_messages_ids:
-                    th = threading.Thread(target=RpcWorker(self.config, self.max_retry_count).send_message, args=[m_id, is_test])  # <- 1 element list
+                    th = threading.Thread(target=RpcWorker(self.config.copy(), self.max_retry_count).send_message, args=[m_id, is_test])  # <- 1 element list
                     th.start()
             self.log_info('{0} msgs was sended.', len(created_messages_ids))
         except Exception as e:
@@ -261,8 +261,12 @@ class RpcWorker:
                                     body=body_str)
             self.log_info('publish message [{0}]. sended data: {1}', message_id, body_str)
 
+            _cc = 0
             while not self.response_received:
                 self.log_info('process_data_events...')
+                _cc += 1
+                if _cc > 1:
+                    time.sleep(0.05)
                 self.connection.process_data_events(time_limit=None)
 
         except MessageRpcClientError as rpc_err:
