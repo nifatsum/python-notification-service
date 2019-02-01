@@ -202,6 +202,7 @@ class MessageRpcClient(object):
             if is_ok and not self.no_ack:
                 self.channel.basic_ack(delivery_tag=method.delivery_tag)
         except Exception as ex:
+            self.channel.basic_nack(delivery_tag=method.delivery_tag)
             raise CallbackProcessingError(ex)
 
     def stop(self):
