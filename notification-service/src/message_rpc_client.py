@@ -130,6 +130,7 @@ class MessageRpcClient(object):
                         if self.max_retry_count <= 0:
                             raise e1
 
+                self.log_info('connect ot Rabbit - successful')
                 self.channel = self.connection.channel()
                 if self.prefetch_count:
                     self.channel.basic_qos(prefetch_count=self.prefetch_count)
