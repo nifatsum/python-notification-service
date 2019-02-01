@@ -228,12 +228,14 @@ class MessageRpcClient(object):
             self.log_info('send messages for notification "{0}". (is_test: {1}, include_faliled: {2}, all_unsuccess: {3})', 
                         notification_id, is_test, include_faliled, all_unsuccess)
 
-            created_messages_ids = None
+            created_messages_ids = []
             with db_session:
                 n = NotificationEntity[notification_id]
-                created_messages_ids = [m.message_id for m in n.messages.select() if (all_unsuccess and m.state_id in ['Error', 'Created']) or (include_faliled and m.state_id == 'Error') or m.state_id == 'Created']
+                tmp_list = n.messages.select(lambda m: (all_unsuccess and m.state_id in ['Error', 'Created']) or (include_faliled and m.state_id == 'Error') or m.state_id == 'Created')
+                self.log_info('tmp_list count: {0}', len(tmp_list))
+                created_messages_ids.extend([m.message_id for m in tmp_list])
 
-            if created_messages_ids:
+            if created_messages_ids and len(created_messages_ids) > 0:
                 for m_id in created_messages_ids:
                     self.send_message(message_id=m_id, is_test=is_test)
             self.log_info('{0} msgs was sended.', len(created_messages_ids))
