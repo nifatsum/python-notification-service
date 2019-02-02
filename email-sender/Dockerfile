@@ -7,6 +7,7 @@ RUN python3.6 -m pip install wheel
 RUN apk update
 # RUN apk add git
 RUN apk add nano
+RUN apk add ssmtp
 
 COPY requirements.txt .
 RUN pip install -r requirements.txt
