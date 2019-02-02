@@ -32,6 +32,8 @@ services:
     #   - "5000:5000"
     environment:
       - RABBIT_HOST=rabbit1
+      - MAX_RETRY_COUNT=18
+      - RABBIT_RECONNECT_DELAY=5
     depends_on:
       - rabbit1
 
