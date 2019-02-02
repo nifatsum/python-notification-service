@@ -1,9 +1,11 @@
+import logging, json
 from datetime import datetime
-from src.api import (jsonify, abort, make_response, request,
+from src.api import (jsonify, abort, make_response, request, swagger,
                     Resource, reqparse, fields, marshal, 
                     Flask, Api, HTTPBasicAuth, auth, orm)
 
 from src.api.models import *
+from src.logger import LoggerProxy
 
 orm.db.bind(provider="sqlite", filename="./../assets/notifications.sqlite", create_db=True)
 orm.db.generate_mapping(create_tables=True)
@@ -11,6 +13,45 @@ orm.DbInitor.seed()
 
 app = Flask(__name__, static_url_path="")
 api = Api(app)
+api = swagger.docs(api, apiVersion='1.0')
+
+
+class LoggerMiddleware(object):
+    def __init__(self, app, logger):
+        self.app = app
+        self.__logger = logger
+
+    def __call__(self, environ, start_response):
+        # self.__logger.info(str(environ.keys()))
+        self.__logger.info("{0} {1}{2} {3}", 
+                        environ.get('REQUEST_METHOD'), 
+                        environ.get('HTTP_HOST'), environ.get('PATH_INFO'), 
+                        environ.get('SERVER_PROTOCOL'))
+        #self.__logger.info("QUERY_STRING:{0} REMOTE_ADDR:{0}", environ['QUERY_STRING'], environ['REMOTE_ADDR'])
+        # ["wsgi.version", "wsgi.url_scheme", "wsgi.input", "wsgi.errors", "wsgi.multithread", 
+        # "wsgi.multiprocess", "wsgi.run_once", "werkzeug.server.shutdown", "SERVER_SOFTWARE", 
+        # "REQUEST_METHOD", "SCRIPT_NAME", "PATH_INFO", "QUERY_STRING", "REMOTE_ADDR", "REMOTE_PORT", 
+        # "SERVER_NAME", "SERVER_PORT", "SERVER_PROTOCOL", "HTTP_AUTHORIZATION", "HTTP_CACHE_CONTROL", 
+        # "HTTP_POSTMAN_TOKEN", "HTTP_USER_AGENT", "HTTP_ACCEPT", "HTTP_HOST", "HTTP_ACCEPT_ENCODING", 
+        # "HTTP_CONNECTION", "werkzeug.request"]
+        #self.__logger.info(json.dumps([k for k in environ.keys()]))
+        # s = ''
+        # for k,v in environ.items():
+        #     s += '{0}: {1}\n'.format(k, v)
+        # self.__logger.info(s.rstrip())
+        return self.app(environ, start_response)
+
+app.wsgi_app = LoggerMiddleware(app.wsgi_app, LoggerProxy('Flask'))
+log = logging.getLogger('werkzeug')
+log.disabled = True
+
+@app.after_request
+def add_header(r):
+    # отключаем кеширование в браузере
+    r.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    r.headers["Pragma"] = "no-cache"
+    r.headers["Expires"] = "0"
+    return r
 
 # @auth.get_password
 # def get_password(username):
